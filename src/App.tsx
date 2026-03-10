@@ -88,6 +88,9 @@ const initLoan = {
   fnmaDelinquencyAtDisaster:"0",
   fnmaSameDlisasterPriorDeferral:false,
   // FHLMC
+  fhlmcHardshipResolved:false,
+  fhlmcCanResumeFull:false,
+  fhlmcImminentDefault:false,
   fhlmcLoanAge:"24",
   fhlmcMortgageType:"Conventional", // Conventional, FHA, VA, RHS
   fhlmcPropertyType:"Primary Residence", // Primary Residence, Second Home, Investment Property
@@ -1429,7 +1432,7 @@ function evaluateFHLMC(l) {
   // ── 1. Repayment Plan ─────────────────────────────────────────────────────────
   {
     const nodes = [
-      node("Hardship resolved (temporary, no longer a problem)", l.fnmaHardshipResolved?"Yes":"No", l.fnmaHardshipResolved),
+      node("Hardship resolved (temporary, no longer a problem)", l.fhlmcHardshipResolved?"Yes":"No", l.fhlmcHardshipResolved),
       node("Property not condemned/abandoned", l.propertyCondition, propertyOK),
     ];
     results.push({ option:"FHLMC Repayment Plan", eligible:nodes.every(nd=>nd.pass), nodes, note:"$500 servicer incentive if ≥60 DLQ at plan entry and borrower reinstates/pays off" });
@@ -1437,12 +1440,10 @@ function evaluateFHLMC(l) {
   // ── 2. Payment Deferral ───────────────────────────────────────────────────────
   {
     const eligDlqRange = dlq >= 2 && dlq <= 6;
-    const eligHardshipResolved = l.fnmaHardshipResolved;
-    const eligCanResume = l.fnmaCanResumeFull;
     const nodes = [
       node("DLQ 2–6 months", dlq+"mo", eligDlqRange),
-      node("Hardship resolved", l.fnmaHardshipResolved?"Yes":"No", eligHardshipResolved),
-      node("Can resume full contractual payment", l.fnmaCanResumeFull?"Yes":"No", eligCanResume),
+      node("Hardship resolved", l.fhlmcHardshipResolved?"Yes":"No", l.fhlmcHardshipResolved),
+      node("Can resume full contractual payment", l.fhlmcCanResumeFull?"Yes":"No", l.fhlmcCanResumeFull),
       node("Conventional 1st lien", l.lienPosition, isConventional && isFirstLien),
       node("No approved liquidation option active", l.fhlmcApprovedLiquidationOption?"Active":"None", noActiveLiquidation),
       node("No active/performing TPP", l.fhlmcActiveTPP?"Active":"None", noActiveTPP),
@@ -1452,19 +1453,15 @@ function evaluateFHLMC(l) {
   }
   // ── 3. Disaster Payment Deferral ─────────────────────────────────────────────
   {
-    const eligDisaster = l.fhlmcDisasterHardship;
-    const eligFEMA = l.fhlmcFEMADesignation;
     const eligDlqAtDisaster = dlqAtDisaster < 2;
     const eligDlqRange = dlq >= 1 && dlq <= 12;
-    const eligHardshipResolved = l.fnmaHardshipResolved;
-    const eligCanResume = l.fnmaCanResumeFull;
     const nodes = [
-      node("Disaster-related hardship", l.fhlmcDisasterHardship?"Yes":"No", eligDisaster),
-      node("Eligible Disaster (FEMA-declared or insured loss)", l.fhlmcFEMADesignation?"Yes":"No", eligFEMA),
+      node("Disaster-related hardship", l.fhlmcDisasterHardship?"Yes":"No", l.fhlmcDisasterHardship),
+      node("Eligible Disaster (FEMA-declared or insured loss)", l.fhlmcFEMADesignation?"Yes":"No", l.fhlmcFEMADesignation),
       node("DLQ at time of disaster < 2 months", dlqAtDisaster+"mo", eligDlqAtDisaster),
       node("Current DLQ 1–12 months", dlq+"mo", eligDlqRange),
-      node("Hardship resolved", l.fnmaHardshipResolved?"Yes":"No", eligHardshipResolved),
-      node("Can resume full contractual payment", l.fnmaCanResumeFull?"Yes":"No", eligCanResume),
+      node("Hardship resolved", l.fhlmcHardshipResolved?"Yes":"No", l.fhlmcHardshipResolved),
+      node("Can resume full contractual payment", l.fhlmcCanResumeFull?"Yes":"No", l.fhlmcCanResumeFull),
       node("Conventional 1st lien", l.lienPosition, isConventional && isFirstLien),
       node("No approved liquidation option active", l.fhlmcApprovedLiquidationOption?"Active":"None", noActiveLiquidation),
       node("No active/performing TPP", l.fhlmcActiveTPP?"Active":"None", noActiveTPP),
@@ -1485,17 +1482,19 @@ function evaluateFHLMC(l) {
   // ── 5a. Freddie Mac Flex Modification — Standard (Full BRP) ──────────────────
   {
     const eligHardship = l.fhlmcLongTermHardship && !l.fhlmcUnemployed;
-    const eligDLQ = dlq >= 2 || l.fnmaImminentDefault;
+    const eligDLQ = dlq >= 2 || l.fhlmcImminentDefault;
     const eligLoanAge = loanAge >= 12;
-    const eligPIReduction = l.borrowerCanAffordModifiedPayment; // P&I ≤ pre-mod required
-    // Imminent default business rule check
-    const imminentCheck = l.fnmaImminentDefault ? (l.fhlmcCashReservesLt25k && isPrimaryRes && (fico <= 620 || l.fhlmcPrior30DayDLQ6Mo || housingRatio > 40 || l.fhlmcLongTermHardship)) : true;
+    // Imminent default: Rule 1 always required; then Rule 2 OR Rule 3
+    const rule1 = l.fhlmcCashReservesLt25k && isPrimaryRes && l.fhlmcLongTermHardship;
+    const rule2 = fico <= 620 || l.fhlmcPrior30DayDLQ6Mo || housingRatio > 40;
+    const imminentValid = !l.fhlmcImminentDefault || (rule1 && rule2);
     const nodes = [
       node("Conventional mortgage (not FHA/VA/RHS)", l.fhlmcMortgageType, isConventional),
       node("First lien", l.lienPosition, isFirstLien),
       node("No recourse arrangement", l.fhlmcRecourse?"Yes":"No", noRecourse),
       node("Loan age ≥ 12 months", loanAge+"mo", eligLoanAge),
-      node("≥ 60 days DLQ OR imminent default determination", dlq+"mo"+(l.fnmaImminentDefault?" (ID)":""), eligDLQ),
+      node("≥ 60 days DLQ OR imminent default determination", dlq+"mo"+(l.fhlmcImminentDefault?" (ID)":""), eligDLQ),
+      ...(l.fhlmcImminentDefault ? [node("Imminent default business rules met (Rule 1 + Rule 2/3)", imminentValid?"Pass":"Fail", imminentValid, "Rule 1: primary res + cash <$25k + LT hardship; Rule 2: FICO ≤620 or 2x30DLQ or DTI>40%")] : []),
       node("Long-term/permanent hardship (not unemployment)", l.fhlmcLongTermHardship?"Yes":"No", eligHardship),
       node("Verified income", l.fhlmcVerifiedIncome?"Yes":"No", l.fhlmcVerifiedIncome),
       node("Investment property: current/<60 DLQ hard stop", l.fhlmcPropertyType, !investmentHardStop),
@@ -2089,6 +2088,9 @@ export default function App() {
                     <div>Post-Cap MTMLTV: <strong>{((n(loan.upb)+n(loan.arrearagesToCapitalize)+n(loan.legalFees))/n(loan.fhlmcPropertyValue)*100).toFixed(1)}%</strong></div>
                     <div className="text-slate-500">≥50% → rate relief eligible; &gt;50% → principal forbearance eligible</div>
                   </div>}
+                  <Tog label="Hardship resolved (temporary, no longer a problem)" value={loan.fhlmcHardshipResolved} onChange={v=>set("fhlmcHardshipResolved",v)}/>
+                  <Tog label="Can resume full contractual monthly payment" value={loan.fhlmcCanResumeFull} onChange={v=>set("fhlmcCanResumeFull",v)}/>
+                  <Tog label="Servicer imminent default determination" value={loan.fhlmcImminentDefault} onChange={v=>set("fhlmcImminentDefault",v)}/>
                   <Tog label="Long-term/permanent hardship (NOT unemployment)" value={loan.fhlmcLongTermHardship} onChange={v=>set("fhlmcLongTermHardship",v)}/>
                   <Tog label="Unemployed borrower (→ forbearance, not Flex Mod)" value={loan.fhlmcUnemployed} onChange={v=>set("fhlmcUnemployed",v)}/>
                   <Tog label="Verified income" value={loan.fhlmcVerifiedIncome} onChange={v=>set("fhlmcVerifiedIncome",v)}/>
