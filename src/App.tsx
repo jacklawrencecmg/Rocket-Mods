@@ -1,7 +1,7 @@
 import { useState, useCallback, useMemo } from "react";
 
 // ─── CONSTANTS ────────────────────────────────────────────────────────────────
-const LOAN_TYPES = ["FHA","USDA","VA","FNMA"];
+const LOAN_TYPES = ["FHA","USDA","VA","FNMA","FHLMC"];
 const TABS = ["inputs","results","audit","report","compare"];
 const TAB_LABELS = { inputs:"📋 Inputs", results:"✅ Results", audit:"🔍 Audit Trail", report:"📄 Report", compare:"⚖️ Compare" };
 const HARDSHIP_TYPES = ["Reduction in Income","Unemployment","Business Failure","Increase in Housing Expenses","Property Problem","Unknown","Disaster"];
@@ -87,6 +87,33 @@ const initLoan = {
   fnmaInsuredLoss:false,
   fnmaDelinquencyAtDisaster:"0",
   fnmaSameDlisasterPriorDeferral:false,
+  // FHLMC
+  fhlmcLoanAge:"24",
+  fhlmcMortgageType:"Conventional", // Conventional, FHA, VA, RHS
+  fhlmcPropertyType:"Primary Residence", // Primary Residence, Second Home, Investment Property
+  fhlmcLongTermHardship:true, // long-term/permanent hardship (NOT unemployment → forbearance)
+  fhlmcUnemployed:false,
+  fhlmcVerifiedIncome:true,
+  fhlmcCashReservesLt25k:true,
+  fhlmcFICO:"680",
+  fhlmcPrior30DayDLQ6Mo:false, // 2+ 30-day DLQ in past 6 months
+  fhlmcHousingExpenseRatio:"", // % — pre-mod housing expense / GMI
+  fhlmcPropertyValue:"", // for MTMLTV calculation
+  fhlmcPostedModRate:"", // Freddie Mac posted modification interest rate
+  fhlmcRecourse:false,
+  fhlmcStepRateMortgage:false,
+  fhlmcRateAdjustedWithin12Mo:false,
+  fhlmcPriorModCount:"0",
+  fhlmcFailedFlexTPP12Mo:false,
+  fhlmcPriorFlexMod60DLQ:false, // prior Flex Mod → 60+ DLQ within 12mo, not cured
+  fhlmcApprovedLiquidationOption:false,
+  fhlmcActiveTPP:false,
+  fhlmcActiveForbearance:false,
+  fhlmcActiveRepayPlan:false,
+  fhlmcUnexpiredOffer:false,
+  fhlmcDisasterHardship:false,
+  fhlmcFEMADesignation:false,
+  fhlmcDLQAtDisaster:"0",
   // VA
   activeRPP:false, pmmsLeCurrentPlus1:true,
   dlqAtDisasterLt30:false, loanGe60DaysDLQ:false,
@@ -918,6 +945,207 @@ function calcApprovalTerms(optionName, l) {
     };
   }
 
+  // ── FHLMC Repayment Plan ──
+  if (opt === "FHLMC Repayment Plan") {
+    const monthlyContractual = n(l.currentPI) + escrow;
+    const incentiveNote = dlqMonths >= 2 ? "Servicer eligible for $500 incentive (≥60 DLQ at plan entry)" : "Servicer incentive requires ≥60 DLQ at plan entry";
+    return {
+      "Plan Type": "Freddie Mac Repayment Plan — Reinstatement via Installments",
+      "Installment Cap": monthlyContractual > 0 ? `Reasonable installment; borrower must demonstrate ability to pay (150% guideline per Freddie Mac)` : "Enter current P&I and escrow",
+      "Combined P&I + Escrow (Contractual)": fmt$(monthlyContractual),
+      "Borrower Eligibility": "Temporary hardship now resolved; borrower can resume full payment + catch-up",
+      "Late Charges": "May be included in repayment plan; must be waived upon completion",
+      "Servicer Compensation": `$500 incentive — ${incentiveNote}`,
+      "Authority": "Freddie Mac Single-Family Guide §9203.2 (02/11/26)",
+    };
+  }
+  // ── FHLMC Payment Deferral ──
+  if (opt === "FHLMC Payment Deferral") {
+    return {
+      "Deferred Amount": fmt$(arrears),
+      "  → Past-Due P&I Payments": `Up to ${Math.min(dlqMonths, 6)} months`,
+      "  → Servicer Advances (third-party)": "Included if paid to third parties prior to effective date",
+      "  → Escrow Shortage": escShortage > 0 ? `${fmt$(escShortage)} — NOT deferred; spread over escrow analysis` : "None",
+      "Interest on Deferred Balance": "None — non-interest-bearing",
+      "Deferred Balance Due": "At maturity, sale/transfer, refinance, or payoff",
+      "First Payment After Deferral": "Full contractual monthly payment",
+      "Late Charges": "Waived upon completion",
+      "Administrative Fees": "None",
+      "Servicer Compensation": "$500 incentive (subject to $1,000 combined cap per mortgage)",
+      "Authority": "Freddie Mac Single-Family Guide §9203 (02/11/26)",
+    };
+  }
+  // ── FHLMC Disaster Payment Deferral ──
+  if (opt === "FHLMC Disaster Payment Deferral") {
+    return {
+      "Deferred Amount": fmt$(arrears),
+      "  → Past-Due P&I Payments": `Up to ${Math.min(dlqMonths, 12)} months (disaster: up to 12 months)`,
+      "  → Servicer Advances (third-party)": "Included",
+      "  → Escrow Shortage": escShortage > 0 ? `${fmt$(escShortage)} — NOT deferred` : "None",
+      "Disaster Nexus Required": "Eligible Disaster — FEMA-declared or insured loss event",
+      "Pre-Disaster Delinquency": "Borrower must have been current or <60 days DLQ at disaster date",
+      "Interest on Deferred Balance": "None — non-interest-bearing",
+      "Deferred Balance Due": "At maturity, sale/transfer, refinance, or payoff",
+      "Servicer Compensation": "$500 incentive (subject to $1,000 combined cap per mortgage)",
+      "Authority": "Freddie Mac Single-Family Guide §9203 Disaster provisions (02/11/26)",
+    };
+  }
+  // ── FHLMC Forbearance Plan (Unemployment) ──
+  if (opt === "FHLMC Forbearance Plan") {
+    const end6mo = addMonths(effDate, 6);
+    const end12mo = addMonths(effDate, 12);
+    return {
+      "Plan Type": "Freddie Mac Forbearance Plan — Unemployment Hardship",
+      "Hardship Requirement": "Unemployment (temporary hardship) — unemployed borrowers must be offered forbearance, not Flex Modification",
+      "Authorized Initial Term": "Up to 6 months (servicer-authorized)",
+      "Extension": "Up to 6 additional months with FHLMC approval (total up to 12 months)",
+      "Payment During Plan": "Reduced or suspended per plan terms",
+      "Late Charges": "Must NOT accrue or be collected during active forbearance",
+      "6-Month End Date": fmtDate(end6mo),
+      "12-Month End Date (max)": fmtDate(end12mo),
+      "Post-Forbearance": "Evaluate for Repayment Plan, Payment Deferral, or Flex Modification upon re-entry",
+      "Note": "A disaster-related forbearance plan does NOT disqualify borrower from subsequent Flex Modification",
+      "Authority": "Freddie Mac Single-Family Guide §9203.3 (02/11/26)",
+    };
+  }
+  // ── Freddie Mac Flex Modification ──
+  if (opt === "Freddie Mac Flex Modification" || opt === "Freddie Mac Flex Modification (Streamlined)" || opt === "Freddie Mac Flex Modification (Disaster)") {
+    // Arrearages capitalizable (NOT escrow shortage — spread over 60 months)
+    const flexNewUPB = upb + arrears + legal;
+    const currentPI_val = n(l.currentPI);
+    const propValue = n(l.fhlmcPropertyValue);
+    const fmModRate = n(l.fhlmcPostedModRate) || n(l.pmmsRate); // FM posted mod rate
+    // MTMLTV with post-capitalized UPB
+    const mtmltv = propValue > 0 && flexNewUPB > 0 ? (flexNewUPB / propValue * 100) : null;
+    // Step 2: Preliminary rate
+    const prelimRate = currentRate; // For fixed-rate mortgages (simplified)
+    // Step 3: Interest rate relief (only if MTMLTV ≥ 50%)
+    const canReduceRate = mtmltv == null || mtmltv >= 50;
+    const rateFloor = fmModRate > 0 ? fmModRate : null;
+    // Step 4: Term extension to 480 months
+    // Step 5: Principal forbearance (only if MTMLTV > 50%, up to 30% of post-cap UPB)
+    const canForbearPrincipal = mtmltv == null || mtmltv > 50;
+    const maxForbearance = flexNewUPB * 0.30;
+    // Target: P&I reduction EXCEEDING 20%
+    const target20Plus = currentPI_val > 0 ? currentPI_val * 0.799 : null; // just under 80% = just over 20% reduction
+    // Step 1 → re-amortize at current rate for remaining term
+    const step1PI = remainingTerm && currentRate > 0 && flexNewUPB > 0 ? calcMonthlyPI(flexNewUPB, currentRate, remainingTerm) : null;
+    // Step 3 → rate reduced to floor, remaining term
+    const step3PI = remainingTerm && rateFloor && rateFloor < currentRate && flexNewUPB > 0 ? calcMonthlyPI(flexNewUPB, rateFloor, remainingTerm) : null;
+    // Step 4 → floor rate at 480 months
+    const step4PI = rateFloor && flexNewUPB > 0 ? calcMonthlyPI(flexNewUPB, rateFloor, 480) : (currentRate > 0 && flexNewUPB > 0 ? calcMonthlyPI(flexNewUPB, currentRate, 480) : null);
+    // Step 5 → forbear principal until target or 30% cap
+    let forbearAmount = 0, ibUPB = flexNewUPB, step5PI = step4PI;
+    if (step4PI != null && target20Plus != null && step4PI > target20Plus && canForbearPrincipal) {
+      // How much principal needs to be forborne to hit target at 480mo?
+      const rateForCalc = (rateFloor && rateFloor < currentRate) ? rateFloor : currentRate;
+      if (rateForCalc > 0) {
+        const r = rateForCalc / 100 / 12;
+        const factor = (r * Math.pow(1+r,480)) / (Math.pow(1+r,480)-1);
+        const targetPrincipal = factor > 0 ? target20Plus / factor : null;
+        if (targetPrincipal != null) {
+          forbearAmount = Math.min(flexNewUPB - targetPrincipal, maxForbearance);
+          forbearAmount = Math.max(0, forbearAmount);
+          ibUPB = flexNewUPB - forbearAmount;
+          step5PI = calcMonthlyPI(ibUPB, rateForCalc, 480);
+        }
+      }
+    }
+    // Determine which step achieves target
+    let achievedPI = null, achievedRate2 = currentRate, achievedTerm2 = remainingTerm || 360, stepApplied2 = "", achievedForbear = 0;
+    if (step1PI != null && target20Plus != null && step1PI <= target20Plus) {
+      stepApplied2 = "Step 1 (re-amortize at current rate, remaining term) — >20% target met";
+      achievedPI = step1PI; achievedRate2 = currentRate; achievedTerm2 = remainingTerm || 360;
+    } else if (step3PI != null && target20Plus != null && step3PI <= target20Plus && canReduceRate) {
+      stepApplied2 = "Step 3 (rate reduced to FM floor rate, remaining term) — >20% target met";
+      achievedPI = step3PI; achievedRate2 = rateFloor || currentRate; achievedTerm2 = remainingTerm || 360;
+    } else if (step4PI != null && target20Plus != null && step4PI <= target20Plus) {
+      stepApplied2 = "Step 4 (480-month term extension) — >20% target met";
+      achievedPI = step4PI; achievedRate2 = (rateFloor && canReduceRate) ? rateFloor : currentRate; achievedTerm2 = 480;
+    } else if (step5PI != null && forbearAmount > 0) {
+      stepApplied2 = `Step 5 (principal forbearance: ${fmt$(forbearAmount)}) — target met or 30% cap applied`;
+      achievedPI = step5PI; achievedRate2 = (rateFloor && canReduceRate) ? rateFloor : currentRate; achievedTerm2 = 480; achievedForbear = forbearAmount;
+    } else {
+      stepApplied2 = step4PI != null ? "Steps 1–5 attempted — target not achieved (offer if P&I ≤ pre-mod)" : "Enter loan data for step analysis";
+      achievedPI = step4PI || step1PI; achievedRate2 = (rateFloor && canReduceRate) ? rateFloor : currentRate; achievedTerm2 = 480;
+    }
+    const achievedPITI2 = achievedPI != null ? achievedPI + escrow : null;
+    const piReductionPct2 = currentPI_val > 0 && achievedPI != null ? (currentPI_val - achievedPI) / currentPI_val * 100 : null;
+    const newMat480fhlmc = noteFirstPmt ? addMonths(effDate, 480) : null;
+    const newMatFHLMC = achievedTerm2 === 480 ? newMat480fhlmc : addMonths(effDate, achievedTerm2);
+    const piEligible = achievedPI != null && currentPI_val > 0 && achievedPI <= currentPI_val;
+    const isStreamlined = opt.includes("Streamlined");
+    const isDisaster = opt.includes("Disaster");
+    return {
+      "Modification Type": `Freddie Mac Flex Modification® — ${isStreamlined ? "Streamlined (No BRP)" : isDisaster ? "Disaster Eligibility" : "Standard (Full BRP)"}`,
+      "Step Applied": stepApplied2 || "—",
+      "Capitalized Amount": fmt$(arrears + legal),
+      "  → Delinquent Accrued Interest / Arrearages": fmt$(arrears),
+      "  → Foreclosure/Legal Costs": fmt$(legal),
+      "  → Escrow Shortage (NOT capitalizable)": escShortage > 0 ? `${fmt$(escShortage)} — spread over 60 months (min 12 months)` : "None",
+      "  → Late Fees (NOT capitalizable)": lateFees > 0 ? `${fmt$(lateFees)} — NOT capitalized` : "None",
+      "New UPB (Post-Capitalization)": fmt$(flexNewUPB),
+      "Post-Mod MTMLTV": mtmltv != null ? `${mtmltv.toFixed(1)}% (${fmt$(flexNewUPB)} / ${fmt$(propValue)})` : "Enter property value for MTMLTV",
+      "FM Posted Modification Rate (Floor)": rateFloor != null ? fmtPct(rateFloor) : "Enter FM posted mod rate",
+      "Rate Relief Applied?": canReduceRate ? (rateFloor && rateFloor < currentRate ? "✅ Yes — MTMLTV ≥ 50%" : "Rate already at or below floor") : "❌ No — MTMLTV < 50%",
+      "New Interest Rate": achievedRate2 > 0 ? fmtPct(achievedRate2) : "N/A",
+      "New Term": achievedTerm2 ? `${achievedTerm2} months (${(achievedTerm2/12).toFixed(1)} years)` : "N/A",
+      ...(achievedForbear > 0 ? {
+        "Principal Forbearance Amount": fmt$(achievedForbear),
+        "  → Interest-Bearing UPB": fmt$(ibUPB),
+        "  → Non-Interest-Bearing (Forborne)": fmt$(achievedForbear),
+        "  → Forbearance Cap (30% of post-cap UPB)": fmt$(maxForbearance),
+        "  Forborne Balance Due": "At maturity, sale/transfer, refinance, or payoff of interest-bearing UPB",
+      } : {}),
+      "New Monthly P&I (Interest-Bearing UPB)": fmt$(achievedPI),
+      "New Monthly Escrow": fmt$(escrow || null),
+      "New Monthly PITI": fmt$(achievedPITI2),
+      "P&I Reduction": piReductionPct2 != null ? `${piReductionPct2.toFixed(1)}% (${fmt$(currentPI_val)} → ${fmt$(achievedPI)})` : "Enter current P&I",
+      "P&I Reduction > 20%? (Target)": piReductionPct2 != null ? (piReductionPct2 > 20 ? `✅ Yes — ${piReductionPct2.toFixed(1)}%` : `⚠️ No (${piReductionPct2.toFixed(1)}%) — still offer if new P&I ≤ pre-mod P&I`) : "Enter current P&I",
+      "New P&I ≤ Pre-Mod P&I? (Minimum Requirement)": piEligible ? `✅ Yes — eligible to offer` : (achievedPI != null && currentPI_val > 0 ? `❌ No — modification cannot be offered` : "Enter current P&I"),
+      "New Maturity Date": fmtDate(newMatFHLMC),
+      "New First Payment Date": fmtDate(newFirstPmt),
+      "Trial Period Plan": "3 monthly payments at estimated post-modified amount",
+      "TPP — First Payment Due": "Last day of first Trial Period month",
+      "Late Charges": "May accrue during TPP; ALL waived upon permanent modification",
+      "Servicer Compensation": "$1,000 incentive (subject to $1,000 combined cap per mortgage)",
+      "Authority": "Freddie Mac Single-Family Guide §9206 (02/11/26)",
+    };
+  }
+  // ── FHLMC Short Sale ──
+  if (opt === "Freddie Mac Short Sale") {
+    const estNet = upb > 0 ? upb * 0.93 : null;
+    return {
+      "Outstanding UPB": fmt$(upb || null),
+      "Property Valuation": "Required — BPO or appraisal; value determined via Resolve",
+      "Estimated Net Proceeds": estNet != null ? `${fmt$(estNet)} (est. ~93% of UPB)` : "Enter UPB for estimate",
+      "Selling Costs Allowed": "Commission, title, transfer taxes, customary closing costs",
+      "Servicer Approval": "Servicer has delegated authority for Standard Short Sale per §9208; others require Freddie Mac approval via Resolve",
+      "Streamlined Short Sale": "Available for eligible borrowers — reduced documentation per §9208.3",
+      "Borrower Deficiency": "May be waived per Freddie Mac guidelines",
+      "Relocation Assistance": "May be available per current Freddie Mac guidelines",
+      "MI Claim": "Servicer provides claim documentation to MI within 60 days of short sale",
+      "Servicer Compensation": "$2,200 incentive",
+      "Authority": "Freddie Mac Single-Family Guide §9208 (02/11/26)",
+    };
+  }
+  // ── FHLMC Deed-in-Lieu ──
+  if (opt === "Freddie Mac Deed-in-Lieu") {
+    return {
+      "Outstanding UPB": fmt$(upb || null),
+      "Property Valuation": "Required — BPO or appraisal via Resolve",
+      "Title Requirement": "Clear title — junior liens must be cleared prior to conveyance",
+      "Property Condition": "Broom-swept, undamaged, ready for sale; borrower must vacate",
+      "Servicer Approval": "Servicer has delegated authority for Standard DIL per §9209; others require Freddie Mac via Resolve",
+      "Streamlined DIL": "Available for eligible borrowers — reduced documentation per §9209",
+      "Borrower Deficiency": "Borrower may be released from deficiency upon FHLMC acceptance",
+      "Relocation Assistance": "May be available per current Freddie Mac guidelines",
+      "MI Claim": "Servicer provides claim documentation to MI within 60 days of DIL acceptance",
+      "Servicer Compensation": "$1,500 incentive",
+      "Authority": "Freddie Mac Single-Family Guide §9209 (02/11/26)",
+    };
+  }
+
   // ── FNMA Forbearance Plan ──
   if (opt === "FNMA Forbearance Plan") {
     const end6mo = addMonths(effDate, 6);
@@ -1171,6 +1399,176 @@ function evaluateVA(l) {
   return results;
 }
 
+function evaluateFHLMC(l) {
+  const results = [];
+  const dlq = n(l.delinquencyMonths);
+  const loanAge = n(l.fhlmcLoanAge);
+  const priorMods = n(l.fhlmcPriorModCount);
+  const dlqAtDisaster = n(l.fhlmcDLQAtDisaster);
+  const fico = n(l.fhlmcFICO);
+  const housingRatio = n(l.fhlmcHousingExpenseRatio);
+  const isConventional = l.fhlmcMortgageType === "Conventional";
+  const isFirstLien = l.lienPosition === "First";
+  const isOwnerOccupied = l.occupancyStatus === "Owner Occupied";
+  const isPrimaryRes = l.fhlmcPropertyType === "Primary Residence";
+  const propertyOK = l.propertyCondition !== "Condemned" && !l.occupancyAbandoned;
+  // Common active-status blockers
+  const noActiveLiquidation = !l.fhlmcApprovedLiquidationOption;
+  const noActiveTPP = !l.fhlmcActiveTPP;
+  const noActiveForbearance = !l.fhlmcActiveForbearance;
+  const noActiveRepay = !l.fhlmcActiveRepayPlan;
+  const noUnexpiredOffer = !l.fhlmcUnexpiredOffer;
+  const noRecourse = !l.fhlmcRecourse;
+  // Hard ineligibility (absolute) for Flex Mod
+  const hardIneligible = !isConventional || l.fhlmcRecourse;
+  // Investment property hard stop only when <60 DLQ
+  const investmentHardStop = l.fhlmcPropertyType === "Investment Property" && dlq < 2;
+  // Soft ineligibility (exception path exists)
+  const softIneligible = priorMods >= 3 || l.fhlmcFailedFlexTPP12Mo || l.fhlmcPriorFlexMod60DLQ;
+
+  // ── 1. Repayment Plan ─────────────────────────────────────────────────────────
+  {
+    const nodes = [
+      node("Hardship resolved (temporary, no longer a problem)", l.fnmaHardshipResolved?"Yes":"No", l.fnmaHardshipResolved),
+      node("Property not condemned/abandoned", l.propertyCondition, propertyOK),
+    ];
+    results.push({ option:"FHLMC Repayment Plan", eligible:nodes.every(nd=>nd.pass), nodes, note:"$500 servicer incentive if ≥60 DLQ at plan entry and borrower reinstates/pays off" });
+  }
+  // ── 2. Payment Deferral ───────────────────────────────────────────────────────
+  {
+    const eligDlqRange = dlq >= 2 && dlq <= 6;
+    const eligHardshipResolved = l.fnmaHardshipResolved;
+    const eligCanResume = l.fnmaCanResumeFull;
+    const nodes = [
+      node("DLQ 2–6 months", dlq+"mo", eligDlqRange),
+      node("Hardship resolved", l.fnmaHardshipResolved?"Yes":"No", eligHardshipResolved),
+      node("Can resume full contractual payment", l.fnmaCanResumeFull?"Yes":"No", eligCanResume),
+      node("Conventional 1st lien", l.lienPosition, isConventional && isFirstLien),
+      node("No approved liquidation option active", l.fhlmcApprovedLiquidationOption?"Active":"None", noActiveLiquidation),
+      node("No active/performing TPP", l.fhlmcActiveTPP?"Active":"None", noActiveTPP),
+      node("No unexpired offer for another workout option", l.fhlmcUnexpiredOffer?"Yes":"No", noUnexpiredOffer),
+    ];
+    results.push({ option:"FHLMC Payment Deferral", eligible:nodes.every(nd=>nd.pass), nodes });
+  }
+  // ── 3. Disaster Payment Deferral ─────────────────────────────────────────────
+  {
+    const eligDisaster = l.fhlmcDisasterHardship;
+    const eligFEMA = l.fhlmcFEMADesignation;
+    const eligDlqAtDisaster = dlqAtDisaster < 2;
+    const eligDlqRange = dlq >= 1 && dlq <= 12;
+    const eligHardshipResolved = l.fnmaHardshipResolved;
+    const eligCanResume = l.fnmaCanResumeFull;
+    const nodes = [
+      node("Disaster-related hardship", l.fhlmcDisasterHardship?"Yes":"No", eligDisaster),
+      node("Eligible Disaster (FEMA-declared or insured loss)", l.fhlmcFEMADesignation?"Yes":"No", eligFEMA),
+      node("DLQ at time of disaster < 2 months", dlqAtDisaster+"mo", eligDlqAtDisaster),
+      node("Current DLQ 1–12 months", dlq+"mo", eligDlqRange),
+      node("Hardship resolved", l.fnmaHardshipResolved?"Yes":"No", eligHardshipResolved),
+      node("Can resume full contractual payment", l.fnmaCanResumeFull?"Yes":"No", eligCanResume),
+      node("Conventional 1st lien", l.lienPosition, isConventional && isFirstLien),
+      node("No approved liquidation option active", l.fhlmcApprovedLiquidationOption?"Active":"None", noActiveLiquidation),
+      node("No active/performing TPP", l.fhlmcActiveTPP?"Active":"None", noActiveTPP),
+      node("No unexpired offer for another workout option", l.fhlmcUnexpiredOffer?"Yes":"No", noUnexpiredOffer),
+    ];
+    results.push({ option:"FHLMC Disaster Payment Deferral", eligible:nodes.every(nd=>nd.pass), nodes });
+  }
+  // ── 4. Forbearance Plan (Unemployment) ───────────────────────────────────────
+  {
+    const eligUnemployed = l.fhlmcUnemployed || l.hardshipType === "Unemployment";
+    const nodes = [
+      node("Unemployed borrower (temporary hardship)", eligUnemployed?"Yes":"No", eligUnemployed),
+      node("Property not condemned/abandoned", l.propertyCondition, propertyOK),
+      node("No approved liquidation option active", l.fhlmcApprovedLiquidationOption?"Active":"None", noActiveLiquidation),
+    ];
+    results.push({ option:"FHLMC Forbearance Plan", eligible:nodes.every(nd=>nd.pass), nodes, note:"Freddie Mac requires forbearance (not Flex Mod) for unemployed borrowers — §9203.3" });
+  }
+  // ── 5a. Freddie Mac Flex Modification — Standard (Full BRP) ──────────────────
+  {
+    const eligHardship = l.fhlmcLongTermHardship && !l.fhlmcUnemployed;
+    const eligDLQ = dlq >= 2 || l.fnmaImminentDefault;
+    const eligLoanAge = loanAge >= 12;
+    const eligPIReduction = l.borrowerCanAffordModifiedPayment; // P&I ≤ pre-mod required
+    // Imminent default business rule check
+    const imminentCheck = l.fnmaImminentDefault ? (l.fhlmcCashReservesLt25k && isPrimaryRes && (fico <= 620 || l.fhlmcPrior30DayDLQ6Mo || housingRatio > 40 || l.fhlmcLongTermHardship)) : true;
+    const nodes = [
+      node("Conventional mortgage (not FHA/VA/RHS)", l.fhlmcMortgageType, isConventional),
+      node("First lien", l.lienPosition, isFirstLien),
+      node("No recourse arrangement", l.fhlmcRecourse?"Yes":"No", noRecourse),
+      node("Loan age ≥ 12 months", loanAge+"mo", eligLoanAge),
+      node("≥ 60 days DLQ OR imminent default determination", dlq+"mo"+(l.fnmaImminentDefault?" (ID)":""), eligDLQ),
+      node("Long-term/permanent hardship (not unemployment)", l.fhlmcLongTermHardship?"Yes":"No", eligHardship),
+      node("Verified income", l.fhlmcVerifiedIncome?"Yes":"No", l.fhlmcVerifiedIncome),
+      node("Investment property: current/<60 DLQ hard stop", l.fhlmcPropertyType, !investmentHardStop),
+      node("Prior modifications < 3", priorMods, priorMods < 3),
+      node("No failed Flex Mod TPP within 12 months", l.fhlmcFailedFlexTPP12Mo?"Yes":"No", !l.fhlmcFailedFlexTPP12Mo),
+      node("No prior Flex Mod re-default within 12mo (not cured)", l.fhlmcPriorFlexMod60DLQ?"Yes":"No", !l.fhlmcPriorFlexMod60DLQ),
+      node("No approved liquidation option active", l.fhlmcApprovedLiquidationOption?"Active":"None", noActiveLiquidation),
+      node("Not under active TPP/forbearance/repayment plan", (l.fhlmcActiveTPP||l.fhlmcActiveForbearance||l.fhlmcActiveRepayPlan)?"Active":"None", noActiveTPP&&noActiveForbearance&&noActiveRepay),
+      node("No unexpired offer for another workout option", l.fhlmcUnexpiredOffer?"Yes":"No", noUnexpiredOffer),
+    ];
+    results.push({ option:"Freddie Mac Flex Modification", eligible:nodes.every(nd=>nd.pass), nodes, note:"Servicer must also confirm modification results in P&I ≤ pre-mod P&I; target is >20% reduction" });
+  }
+  // ── 5b. Freddie Mac Flex Modification — Streamlined (No BRP) ─────────────────
+  {
+    const eligStreamlined = dlq >= 3 || (l.fhlmcStepRateMortgage && l.fhlmcRateAdjustedWithin12Mo && dlq >= 2);
+    const nodes = [
+      node("Conventional mortgage (not FHA/VA/RHS)", l.fhlmcMortgageType, isConventional),
+      node("First lien", l.lienPosition, isFirstLien),
+      node("No recourse arrangement", l.fhlmcRecourse?"Yes":"No", noRecourse),
+      node("Loan age ≥ 12 months", loanAge+"mo", loanAge >= 12),
+      node("≥ 90 days DLQ OR Step-Rate 60+ DLQ within 12mo of adjustment", dlq+"mo"+(l.fhlmcStepRateMortgage?" (step-rate)":""), eligStreamlined),
+      node("Investment property: current/<60 DLQ hard stop", l.fhlmcPropertyType, !investmentHardStop),
+      node("Prior modifications < 3", priorMods, priorMods < 3),
+      node("No failed Flex Mod TPP within 12 months", l.fhlmcFailedFlexTPP12Mo?"Yes":"No", !l.fhlmcFailedFlexTPP12Mo),
+      node("No prior Flex Mod re-default within 12mo (not cured)", l.fhlmcPriorFlexMod60DLQ?"Yes":"No", !l.fhlmcPriorFlexMod60DLQ),
+      node("No approved liquidation option active", l.fhlmcApprovedLiquidationOption?"Active":"None", noActiveLiquidation),
+      node("Not under active TPP/forbearance/repayment plan", (l.fhlmcActiveTPP||l.fhlmcActiveForbearance||l.fhlmcActiveRepayPlan)?"Active":"None", noActiveTPP&&noActiveForbearance&&noActiveRepay),
+      node("No unexpired offer for another workout option", l.fhlmcUnexpiredOffer?"Yes":"No", noUnexpiredOffer),
+    ];
+    results.push({ option:"Freddie Mac Flex Modification (Streamlined)", eligible:nodes.every(nd=>nd.pass), nodes, note:"No BRP, hardship, or income verification required for streamlined path" });
+  }
+  // ── 5c. Freddie Mac Flex Modification — Disaster ──────────────────────────────
+  {
+    const eligDisaster = l.fhlmcDisasterHardship;
+    const eligFEMA = l.fhlmcFEMADesignation;
+    const eligDlqAtDisaster = dlqAtDisaster < 2;
+    const nodes = [
+      node("Disaster-related hardship", l.fhlmcDisasterHardship?"Yes":"No", eligDisaster),
+      node("Eligible Disaster (FEMA-declared)", l.fhlmcFEMADesignation?"Yes":"No", eligFEMA),
+      node("Conventional mortgage (not FHA/VA/RHS)", l.fhlmcMortgageType, isConventional),
+      node("First lien", l.lienPosition, isFirstLien),
+      node("No recourse arrangement", l.fhlmcRecourse?"Yes":"No", noRecourse),
+      node("Current or <60 days DLQ at time of disaster", dlqAtDisaster+"mo", eligDlqAtDisaster),
+      node("Not under active approved liquidation option", l.fhlmcApprovedLiquidationOption?"Active":"None", noActiveLiquidation),
+      node("Not under active non-disaster TPP/repayment plan", (l.fhlmcActiveTPP||l.fhlmcActiveRepayPlan)?"Active":"None", noActiveTPP&&noActiveRepay),
+      node("No unexpired non-disaster workout offer", l.fhlmcUnexpiredOffer?"Yes":"No", noUnexpiredOffer),
+    ];
+    results.push({ option:"Freddie Mac Flex Modification (Disaster)", eligible:nodes.every(nd=>nd.pass), nodes, note:"Prior solicitation not required; disaster forbearance plan does NOT disqualify" });
+  }
+  // ── 6. Short Sale ─────────────────────────────────────────────────────────────
+  {
+    const eligIntent = !l.borrowerIntentRetention;
+    const nodes = [
+      node("Borrower intent = Disposition", l.borrowerIntentRetention?"Retain":"Dispose", eligIntent),
+      node("Eligible hardship", l.hardshipType, l.hardshipType !== "None"),
+      node("Conventional mortgage", l.fhlmcMortgageType, isConventional),
+    ];
+    results.push({ option:"Freddie Mac Short Sale", eligible:nodes.every(nd=>nd.pass), nodes, note:"$2,200 servicer incentive; Streamlined Short Sale available for eligible borrowers" });
+  }
+  // ── 7. Deed-in-Lieu ───────────────────────────────────────────────────────────
+  {
+    const eligIntent = !l.borrowerIntentRetention;
+    const nodes = [
+      node("Borrower intent = Disposition", l.borrowerIntentRetention?"Retain":"Dispose", eligIntent),
+      node("Eligible hardship", l.hardshipType, l.hardshipType !== "None"),
+      node("Conventional mortgage", l.fhlmcMortgageType, isConventional),
+      node("Meets Deed-in-Lieu requirements", l.meetsDILRequirements?"Yes":"No", l.meetsDILRequirements),
+    ];
+    results.push({ option:"Freddie Mac Deed-in-Lieu", eligible:nodes.every(nd=>nd.pass), nodes, note:"$1,500 servicer incentive; Streamlined DIL available for eligible borrowers" });
+  }
+  return results;
+}
+
 function evaluateFNMA(l) {
   const results = [];
   const dlq = n(l.delinquencyMonths);
@@ -1389,7 +1787,7 @@ export default function App() {
   const [evaluated2,setEvaluated2]=useState(false);
   const set=useCallback((k,v)=>{setLoan(p=>({...p,[k]:v}));setEvaluated(false);},[]);
   const set2=useCallback((k,v)=>{setLoan2(p=>({...p,[k]:v}));setEvaluated2(false);},[]);
-  const evalLoan=(l)=>l.loanType==="FHA"?evaluateFHA(l):l.loanType==="USDA"?evaluateUSDA(l):l.loanType==="VA"?evaluateVA(l):evaluateFNMA(l);
+  const evalLoan=(l)=>l.loanType==="FHA"?evaluateFHA(l):l.loanType==="USDA"?evaluateUSDA(l):l.loanType==="VA"?evaluateVA(l):l.loanType==="FNMA"?evaluateFNMA(l):evaluateFHLMC(l);
   const evaluate=()=>{setResults(evalLoan(loan));setEvaluated(true);setTab("results");setAiResponse("");};
   const evaluate2=()=>{setResults2(evalLoan(loan2));setEvaluated2(true);};
   const eligible=results.filter(r=>r.eligible), ineligible=results.filter(r=>!r.eligible);
@@ -1441,7 +1839,7 @@ export default function App() {
             <div className="w-9 h-9 rounded-xl bg-blue-500 flex items-center justify-center text-lg shadow-lg shadow-blue-900/50">🚀</div>
             <div>
               <h1 className="text-lg font-black tracking-tight">Rocket Mods</h1>
-              <p className="text-blue-300 text-xs font-medium">FHA · USDA · VA · FNMA Loss Mitigation Rules Engine</p>
+              <p className="text-blue-300 text-xs font-medium">FHA · USDA · VA · FNMA · FHLMC Loss Mitigation Rules Engine</p>
             </div>
           </div>
           <div className="flex items-center gap-1.5 bg-white/10 rounded-xl p-1 backdrop-blur-sm">
@@ -1676,6 +2074,51 @@ export default function App() {
                     <Tog label="Property experienced an insured loss" value={loan.fnmaInsuredLoss} onChange={v=>set("fnmaInsuredLoss",v)}/>
                     <F label="DLQ at time of disaster (months — 0 = current)"><Num value={loan.fnmaDelinquencyAtDisaster} onChange={v=>set("fnmaDelinquencyAtDisaster",v)} placeholder="0"/></F>
                     <Tog label="Already received deferral for this same disaster event" value={loan.fnmaSameDlisasterPriorDeferral} onChange={v=>set("fnmaSameDlisasterPriorDeferral",v)}/>
+                  </>)}
+                </Sec>
+              </>)}
+              {loan.loanType==="FHLMC"&&(<>
+                <Sec title="FHLMC – Loan Status">
+                  <F label="Loan Age (months since origination)"><Num value={loan.fhlmcLoanAge} onChange={v=>set("fhlmcLoanAge",v)} placeholder="e.g. 36"/></F>
+                  <F label="Mortgage Type"><Sel value={loan.fhlmcMortgageType} onChange={v=>set("fhlmcMortgageType",v)} options={["Conventional","FHA","VA","RHS"]}/></F>
+                  <F label="Property Type"><Sel value={loan.fhlmcPropertyType} onChange={v=>set("fhlmcPropertyType",v)} options={["Primary Residence","Second Home","Investment Property"]}/></F>
+                  <F label="FM Posted Modification Rate (%)"><Num value={loan.fhlmcPostedModRate} onChange={v=>set("fhlmcPostedModRate",v)} placeholder="e.g. 6.5"/></F>
+                  <F label="Estimated Property Value"><Num value={loan.fhlmcPropertyValue} onChange={v=>set("fhlmcPropertyValue",v)} placeholder="e.g. 300000" prefix="$"/></F>
+                  {n(loan.fhlmcPropertyValue)>0&&n(loan.upb)>0&&<div className="bg-violet-50 rounded p-2 text-xs text-violet-800 space-y-0.5 mt-1">
+                    <div>Current MTMLTV: <strong>{(n(loan.upb)/n(loan.fhlmcPropertyValue)*100).toFixed(1)}%</strong></div>
+                    <div>Post-Cap MTMLTV: <strong>{((n(loan.upb)+n(loan.arrearagesToCapitalize)+n(loan.legalFees))/n(loan.fhlmcPropertyValue)*100).toFixed(1)}%</strong></div>
+                    <div className="text-slate-500">≥50% → rate relief eligible; &gt;50% → principal forbearance eligible</div>
+                  </div>}
+                  <Tog label="Long-term/permanent hardship (NOT unemployment)" value={loan.fhlmcLongTermHardship} onChange={v=>set("fhlmcLongTermHardship",v)}/>
+                  <Tog label="Unemployed borrower (→ forbearance, not Flex Mod)" value={loan.fhlmcUnemployed} onChange={v=>set("fhlmcUnemployed",v)}/>
+                  <Tog label="Verified income" value={loan.fhlmcVerifiedIncome} onChange={v=>set("fhlmcVerifiedIncome",v)}/>
+                  <Tog label="Recourse or indemnification arrangement" value={loan.fhlmcRecourse} onChange={v=>set("fhlmcRecourse",v)}/>
+                </Sec>
+                <Sec title="FHLMC – Imminent Default (current/&lt;60 DLQ)">
+                  <Tog label="Cash Reserves < $25,000" value={loan.fhlmcCashReservesLt25k} onChange={v=>set("fhlmcCashReservesLt25k",v)}/>
+                  <F label="FICO Score (middle/lower method)"><Num value={loan.fhlmcFICO} onChange={v=>set("fhlmcFICO",v)} placeholder="e.g. 620"/></F>
+                  <F label="Pre-Mod Housing Expense / GMI (%)"><Num value={loan.fhlmcHousingExpenseRatio} onChange={v=>set("fhlmcHousingExpenseRatio",v)} placeholder="e.g. 45"/></F>
+                  <Tog label="2+ 30-day DLQ in most recent 6-month period" value={loan.fhlmcPrior30DayDLQ6Mo} onChange={v=>set("fhlmcPrior30DayDLQ6Mo",v)}/>
+                </Sec>
+                <Sec title="FHLMC – Prior Workout History">
+                  <F label="Prior modifications (count)"><Num value={loan.fhlmcPriorModCount} onChange={v=>set("fhlmcPriorModCount",v)} placeholder="0"/></F>
+                  <Tog label="Failed Flex Mod TPP within 12 months" value={loan.fhlmcFailedFlexTPP12Mo} onChange={v=>set("fhlmcFailedFlexTPP12Mo",v)}/>
+                  <Tog label="Prior Flex Mod → 60+ DLQ within 12mo, not cured" value={loan.fhlmcPriorFlexMod60DLQ} onChange={v=>set("fhlmcPriorFlexMod60DLQ",v)}/>
+                  <Tog label="Step-Rate Mortgage" value={loan.fhlmcStepRateMortgage} onChange={v=>set("fhlmcStepRateMortgage",v)}/>
+                  {loan.fhlmcStepRateMortgage&&<Tog label="Interest rate adjusted within past 12 months" value={loan.fhlmcRateAdjustedWithin12Mo} onChange={v=>set("fhlmcRateAdjustedWithin12Mo",v)}/>}
+                </Sec>
+                <Sec title="FHLMC – Active Status Blockers">
+                  <Tog label="Approved liquidation option (short sale / DIL) active" value={loan.fhlmcApprovedLiquidationOption} onChange={v=>set("fhlmcApprovedLiquidationOption",v)}/>
+                  <Tog label="Active and performing modification TPP" value={loan.fhlmcActiveTPP} onChange={v=>set("fhlmcActiveTPP",v)}/>
+                  <Tog label="Active and performing forbearance plan" value={loan.fhlmcActiveForbearance} onChange={v=>set("fhlmcActiveForbearance",v)}/>
+                  <Tog label="Active and performing repayment plan" value={loan.fhlmcActiveRepayPlan} onChange={v=>set("fhlmcActiveRepayPlan",v)}/>
+                  <Tog label="Unexpired offer for another modification/workout option" value={loan.fhlmcUnexpiredOffer} onChange={v=>set("fhlmcUnexpiredOffer",v)}/>
+                </Sec>
+                <Sec title="FHLMC – Disaster">
+                  <Tog label="Disaster-related hardship" value={loan.fhlmcDisasterHardship} onChange={v=>set("fhlmcDisasterHardship",v)}/>
+                  {loan.fhlmcDisasterHardship&&(<>
+                    <Tog label="Eligible Disaster (FEMA-declared individual assistance)" value={loan.fhlmcFEMADesignation} onChange={v=>set("fhlmcFEMADesignation",v)}/>
+                    <F label="DLQ at time of disaster (months — 0 = current)"><Num value={loan.fhlmcDLQAtDisaster} onChange={v=>set("fhlmcDLQAtDisaster",v)} placeholder="0"/></F>
                   </>)}
                 </Sec>
               </>)}
