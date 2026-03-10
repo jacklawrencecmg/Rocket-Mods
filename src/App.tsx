@@ -1,5 +1,5 @@
 import { useState, useCallback, useMemo, useEffect } from "react";
-import { supabase } from "./supabase";
+import { supabase, supabaseConfigured } from "./supabase";
 
 // ─── CONSTANTS ────────────────────────────────────────────────────────────────
 const LOAN_TYPES = ["FHA","USDA","VA","FNMA","FHLMC"];
@@ -2527,6 +2527,13 @@ export default function App() {
   const shell=(content:React.ReactNode)=>(
     <div className="min-h-screen bg-gradient-to-br from-slate-900 via-slate-800 to-slate-900 flex items-center justify-center p-4">
       <div className="w-full max-w-sm">{logo}{content}<p className="text-center text-slate-600 text-xs mt-6">CMG Financial · Loss Mitigation</p></div>
+    </div>
+  );
+
+  if(!supabaseConfigured) return shell(
+    <div className="bg-red-900/40 border border-red-700 rounded-2xl p-6 text-center space-y-2">
+      <p className="text-red-300 font-bold">Configuration Error</p>
+      <p className="text-red-400 text-sm">Supabase environment variables are not set. Add <code className="bg-red-900/60 px-1 rounded">VITE_SUPABASE_URL</code> and <code className="bg-red-900/60 px-1 rounded">VITE_SUPABASE_ANON_KEY</code> as GitHub repository secrets, then re-run the deployment.</p>
     </div>
   );
 
