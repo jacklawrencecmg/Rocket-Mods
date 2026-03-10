@@ -988,30 +988,32 @@ function evaluateVA(l) {
 }
 
 // ─── UI HELPERS ───────────────────────────────────────────────────────────────
-const Sec=({title,children})=>(<div className="mb-4"><div className="text-xs font-bold uppercase tracking-wider text-gray-500 mb-2 border-b border-gray-200 pb-1">{title}</div><div className="space-y-2">{children}</div></div>);
-const F=({label,children})=>(<div className="flex flex-col gap-0.5"><label className="text-xs text-gray-700 font-medium">{label}</label>{children}</div>);
-const Sel=({value,onChange,options})=>(<select className="border border-gray-300 rounded px-2 py-1 text-sm bg-white w-full" value={value} onChange={e=>onChange(e.target.value)}>{options.map(o=><option key={o} value={o}>{o}</option>)}</select>);
-const Tog=({value,onChange,label})=>(<div className="flex items-center justify-between gap-2">{label&&<span className="text-xs text-gray-700 font-medium flex-1 leading-tight">{label}</span>}<button onClick={()=>onChange(!value)} className={`w-12 h-6 rounded-full transition-colors flex-shrink-0 ${value?"bg-blue-500":"bg-gray-300"}`}><span className={`block w-5 h-5 bg-white rounded-full shadow transition-transform mx-0.5 ${value?"translate-x-6":"translate-x-0"}`}/></button></div>);
-const Num=({value,onChange,placeholder,prefix})=>(<div className="flex items-center gap-1">{prefix&&<span className="text-sm text-gray-500">{prefix}</span>}<input type="number" min="0" step="any" className="border border-gray-300 rounded px-2 py-1 text-sm w-full" value={value} onChange={e=>onChange(e.target.value)} placeholder={placeholder}/></div>);
-const DateInput=({value,onChange,label})=>(<div className="flex flex-col gap-0.5"><label className="text-xs text-gray-700 font-medium">{label}</label><input type="date" className="border border-gray-300 rounded px-2 py-1 text-sm w-full" value={value} onChange={e=>onChange(e.target.value)}/></div>);
+const Sec=({title,children})=>(<div className="mb-5"><div className="flex items-center gap-2 mb-3"><div className="h-3.5 w-0.5 rounded-full bg-blue-400"/><span className="text-[10px] font-black uppercase tracking-widest text-slate-400">{title}</span></div><div className="space-y-2.5">{children}</div></div>);
+const F=({label,children})=>(<div className="flex flex-col gap-1"><label className="text-[10px] font-bold uppercase tracking-widest text-slate-400">{label}</label>{children}</div>);
+const Sel=({value,onChange,options})=>(<select className="border border-slate-200 rounded-lg px-3 py-1.5 text-sm bg-white w-full shadow-sm focus:outline-none focus:ring-2 focus:ring-blue-400 focus:border-transparent transition-shadow" value={value} onChange={e=>onChange(e.target.value)}>{options.map(o=><option key={o} value={o}>{o}</option>)}</select>);
+const Tog=({value,onChange,label})=>(<div className="flex items-center justify-between gap-3 py-0.5">{label&&<span className="text-xs text-slate-600 flex-1 leading-snug">{label}</span>}<button onClick={()=>onChange(!value)} className={`relative w-11 h-6 rounded-full transition-all duration-200 flex-shrink-0 focus:outline-none ${value?"bg-blue-500":"bg-slate-200"}`}><span className={`absolute top-0.5 left-0.5 w-5 h-5 bg-white rounded-full shadow transition-transform duration-200 ${value?"translate-x-5":"translate-x-0"}`}/></button></div>);
+const Num=({value,onChange,placeholder,prefix})=>(<div className="flex items-center border border-slate-200 rounded-lg overflow-hidden shadow-sm focus-within:ring-2 focus-within:ring-blue-400 focus-within:border-transparent transition-shadow">{prefix&&<span className="bg-slate-50 px-2.5 text-xs text-slate-400 border-r border-slate-200 py-2 font-bold">{prefix}</span>}<input type="number" min="0" step="any" className="flex-1 px-3 py-1.5 text-sm bg-white focus:outline-none" value={value} onChange={e=>onChange(e.target.value)} placeholder={placeholder}/></div>);
+const DateInput=({value,onChange,label})=>(<div className="flex flex-col gap-1"><label className="text-[10px] font-bold uppercase tracking-widest text-slate-400">{label}</label><input type="date" className="border border-slate-200 rounded-lg px-3 py-1.5 text-sm w-full shadow-sm focus:outline-none focus:ring-2 focus:ring-blue-400 focus:border-transparent transition-shadow" value={value} onChange={e=>onChange(e.target.value)}/></div>);
 
 // ─── CALCULATED TERMS PANEL ───────────────────────────────────────────────────
 function CalcTermsPanel({ optionName, loan }) {
   const terms = useMemo(() => calcApprovalTerms(optionName, loan), [optionName, loan]);
   return (
-    <div className="mt-2 rounded-lg border border-blue-200 overflow-hidden">
-      <div className="bg-blue-900 text-white px-3 py-1.5 text-xs font-bold">📋 Calculated Approval Terms — {optionName}</div>
+    <div className="mt-3 rounded-xl border border-slate-200 overflow-hidden shadow-sm">
+      <div className="bg-slate-700 text-white px-4 py-2 text-xs font-bold flex items-center gap-2">
+        <span className="opacity-70">📋</span><span>Approval Terms — {optionName}</span>
+      </div>
       <table className="w-full text-xs">
         <tbody>
           {Object.entries(terms).map(([k,v],i) => {
-            const isHeader = k.startsWith("  → ") || k.startsWith("  ");
+            const isSub = k.startsWith("  → ") || k.startsWith("  ");
             const isPass = String(v).startsWith("✅");
             const isFail = String(v).startsWith("❌");
             const isWarn = String(v).includes("NOT") || String(v).includes("EXCLUDED") || String(v).includes("Enter");
             return (
-              <tr key={i} className={`border-b border-gray-100 ${i%2===0?"bg-white":"bg-gray-50"} ${isPass?"bg-green-50":isFail?"bg-red-50":""}`}>
-                <td className={`px-3 py-1.5 font-semibold text-gray-600 w-1/2 ${isHeader?"pl-6 text-gray-400":""}`}>{k}</td>
-                <td className={`px-3 py-1.5 font-mono ${isPass?"text-green-700 font-bold":isFail?"text-red-700 font-bold":isWarn?"text-orange-600":"text-gray-900"}`}>{v}</td>
+              <tr key={i} className={`border-b border-slate-100 last:border-0 ${isPass?"bg-emerald-50":isFail?"bg-red-50":i%2===0?"bg-white":"bg-slate-50/60"}`}>
+                <td className={`px-4 py-2 w-[48%] ${isSub?"pl-8 text-slate-400 font-normal":"font-semibold text-slate-600"}`}>{k}</td>
+                <td className={`px-4 py-2 font-mono ${isPass?"text-emerald-700 font-bold":isFail?"text-red-600 font-bold":isWarn?"text-amber-600":"text-slate-800"}`}>{v}</td>
               </tr>
             );
           })}
@@ -1104,24 +1106,35 @@ export default function App() {
   };
 
   return (
-    <div className="min-h-screen bg-gray-100">
-      <div className="bg-blue-900 text-white px-6 py-4">
-        <h1 className="text-xl font-bold">Loss Mitigation Rules Engine</h1>
-        <p className="text-blue-200 text-sm">FHA · USDA · VA — Full Calculated Approval Terms</p>
+    <div className="min-h-screen bg-slate-100">
+      {/* ── Header ── */}
+      <div className="bg-gradient-to-r from-slate-900 via-blue-950 to-slate-900 text-white px-6 py-4 shadow-xl">
+        <div className="max-w-7xl mx-auto flex items-center justify-between">
+          <div className="flex items-center gap-3">
+            <div className="w-9 h-9 rounded-xl bg-blue-500 flex items-center justify-center text-lg shadow-lg shadow-blue-900/50">🚀</div>
+            <div>
+              <h1 className="text-lg font-black tracking-tight">Rocket Mods</h1>
+              <p className="text-blue-300 text-xs font-medium">FHA · USDA · VA Loss Mitigation Rules Engine</p>
+            </div>
+          </div>
+          <div className="flex items-center gap-1.5 bg-white/10 rounded-xl p-1 backdrop-blur-sm">
+            {LOAN_TYPES.map(t=>(<button key={t} onClick={()=>{set("loanType",t);setEvaluated(false);setResults([]);}} className={`px-4 py-1.5 rounded-lg text-sm font-black transition-all ${loan.loanType===t?"bg-white text-slate-900 shadow-md":"text-blue-200 hover:text-white hover:bg-white/10"}`}>{t}</button>))}
+          </div>
+        </div>
       </div>
-      <div className="bg-blue-800 px-6 py-2 flex items-center gap-3 flex-wrap">
-        {LOAN_TYPES.map(t=>(<button key={t} onClick={()=>{set("loanType",t);setEvaluated(false);setResults([]);}} className={`px-4 py-1 rounded text-sm font-bold ${loan.loanType===t?"bg-white text-blue-900":"text-white hover:bg-blue-700"}`}>{t}</button>))}
-        <div className="ml-auto flex gap-1 flex-wrap">
-          {TABS.map(t=>(<button key={t} onClick={()=>setTab(t)} className={`px-3 py-1 rounded text-xs font-semibold ${tab===t?"bg-white text-blue-900":"text-blue-200 hover:bg-blue-700"}`}>{TAB_LABELS[t]}</button>))}
+      {/* ── Tab Bar ── */}
+      <div className="bg-white border-b border-slate-200 shadow-sm px-6">
+        <div className="max-w-7xl mx-auto flex items-center gap-1">
+          {TABS.map(t=>(<button key={t} onClick={()=>setTab(t)} className={`px-4 py-3 text-xs font-bold transition-all border-b-2 -mb-px ${tab===t?"border-blue-500 text-blue-700":"border-transparent text-slate-500 hover:text-slate-800 hover:border-slate-300"}`}>{TAB_LABELS[t]}</button>))}
         </div>
       </div>
 
-      <div className="max-w-6xl mx-auto p-4">
+      <div className="max-w-7xl mx-auto p-5">
         {/* ── INPUTS ── */}
         {tab==="inputs"&&(
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-5">
             {/* Col 1 */}
-            <div className="bg-white rounded-lg shadow p-4 overflow-y-auto" style={{maxHeight:"80vh"}}>
+            <div className="bg-white rounded-2xl shadow-sm border border-slate-200 p-5 overflow-y-auto" style={{maxHeight:"82vh"}}>
               <Sec title="📁 Loan Info">
                 <F label="Loan Number"><input className="border border-gray-300 rounded px-2 py-1 text-sm w-full" value={loan.loanNumber} onChange={e=>set("loanNumber",e.target.value)} placeholder="e.g. 1234567890"/></F>
                 <F label="Borrower Name"><input className="border border-gray-300 rounded px-2 py-1 text-sm w-full" value={loan.borrowerName} onChange={e=>set("borrowerName",e.target.value)} placeholder="Last, First"/></F>
@@ -1158,7 +1171,7 @@ export default function App() {
               </Sec>
             </div>
             {/* Col 2 */}
-            <div className="bg-white rounded-lg shadow p-4 overflow-y-auto" style={{maxHeight:"80vh"}}>
+            <div className="bg-white rounded-2xl shadow-sm border border-slate-200 p-5 overflow-y-auto" style={{maxHeight:"82vh"}}>
               <Sec title="📅 Loan Dates">
                 <DateInput label="Note First Payment Date" value={loan.noteFirstPaymentDate} onChange={v=>set("noteFirstPaymentDate",v)}/>
                 <F label="Note Term (months)"><Num value={loan.noteTerm} onChange={v=>set("noteTerm",v)} placeholder="e.g. 360"/></F>
@@ -1198,7 +1211,7 @@ export default function App() {
               </Sec>
             </div>
             {/* Col 3 - loan type specific */}
-            <div className="bg-white rounded-lg shadow p-4 overflow-y-auto" style={{maxHeight:"80vh"}}>
+            <div className="bg-white rounded-2xl shadow-sm border border-slate-200 p-5 overflow-y-auto" style={{maxHeight:"82vh"}}>
               <Sec title="🔧 Modification Flags">
                 <Tog label="Can achieve target by re-amortizing 360 months" value={loan.canAchieveTargetByReamort} onChange={v=>set("canAchieveTargetByReamort",v)}/>
                 <Tog label="Current rate at/below market" value={loan.currentRateAtOrBelowMarket} onChange={v=>set("currentRateAtOrBelowMarket",v)}/>
@@ -1310,44 +1323,56 @@ export default function App() {
                 <Tog label="Outstanding debt uncurable" value={loan.outstandingDebtUncurable} onChange={v=>set("outstandingDebtUncurable",v)}/>
                 <Tog label="Meets Deed-in-Lieu requirements" value={loan.meetsDILRequirements} onChange={v=>set("meetsDILRequirements",v)}/>
               </Sec>
-              <button onClick={evaluate} className="w-full bg-blue-800 hover:bg-blue-900 text-white font-bold py-3 rounded-lg text-sm mt-3">🔍 Evaluate Loan →</button>
+              <button onClick={evaluate} className="w-full bg-gradient-to-r from-blue-600 to-blue-700 hover:from-blue-700 hover:to-blue-800 text-white font-black py-3 rounded-xl text-sm mt-3 shadow-lg shadow-blue-200 transition-all active:scale-95">🔍 Evaluate Loan →</button>
             </div>
           </div>
         )}
 
         {/* ── RESULTS ── */}
         {tab==="results"&&(
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-            <div className="overflow-y-auto" style={{maxHeight:"80vh"}}>
-              {!evaluated?<div className="bg-white rounded-lg shadow p-8 text-center text-gray-400">Click Evaluate on Inputs tab</div>:(<>
-                <div className="flex items-center gap-2 mb-3 flex-wrap">
-                  <span className="font-bold text-gray-800">{loan.loanType} Results</span>
-                  <span className="text-xs bg-green-100 text-green-800 px-2 py-0.5 rounded-full font-semibold">{eligible.length} eligible</span>
-                  <span className="text-xs bg-red-100 text-red-700 px-2 py-0.5 rounded-full font-semibold">{ineligible.length} ineligible</span>
-                  <button onClick={printReport} className="ml-auto text-xs bg-gray-100 hover:bg-gray-200 text-gray-700 px-3 py-1 rounded">🖨 Print</button>
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
+            <div className="overflow-y-auto" style={{maxHeight:"82vh"}}>
+              {!evaluated?<div className="bg-white rounded-2xl shadow-sm border border-slate-200 p-10 text-center text-slate-400">
+                <div className="text-4xl mb-3">🔍</div>
+                <div className="font-semibold">Complete the Inputs tab and click Evaluate</div>
+              </div>:(<>
+                {/* Header row */}
+                <div className="flex items-center gap-2 mb-4 flex-wrap">
+                  <span className="font-black text-slate-800 text-lg">{loan.loanType}</span>
+                  <span className="text-xs bg-emerald-100 text-emerald-800 px-2.5 py-1 rounded-full font-bold">{eligible.length} eligible</span>
+                  <span className="text-xs bg-red-100 text-red-700 px-2.5 py-1 rounded-full font-bold">{ineligible.length} ineligible</span>
+                  <button onClick={printReport} className="ml-auto text-xs bg-white hover:bg-slate-50 text-slate-600 border border-slate-200 px-3 py-1.5 rounded-lg shadow-sm font-medium transition-all">🖨 Print Report</button>
                 </div>
                 {/* Waterfall */}
-                <div className="bg-gray-50 border border-gray-200 rounded-lg p-3 mb-3">
-                  <div className="text-xs font-bold text-gray-600 mb-2">📊 Waterfall Sequence</div>
-                  <div className="flex flex-wrap gap-1">
+                <div className="bg-white rounded-2xl border border-slate-200 shadow-sm p-4 mb-4">
+                  <div className="text-[10px] font-black uppercase tracking-widest text-slate-400 mb-3">Waterfall Sequence</div>
+                  <div className="flex flex-wrap gap-1.5">
                     {results.map((r,i)=>(<div key={i} className="flex items-center gap-1">
-                      <div className={`text-xs px-2 py-0.5 rounded border font-semibold ${r.eligible?"bg-green-100 border-green-400 text-green-800":"bg-red-50 border-red-200 text-red-400 line-through"}`}>{i+1}. {r.option.split(" ").slice(-2).join(" ")}</div>
-                      {i<results.length-1&&<span className="text-gray-300">→</span>}
+                      <div className={`flex items-center gap-1.5 text-xs px-2.5 py-1.5 rounded-lg border font-semibold transition-all ${r.eligible?"bg-emerald-50 border-emerald-200 text-emerald-800":"bg-slate-50 border-slate-200 text-slate-400 line-through"}`}>
+                        <span className={`w-4 h-4 rounded-full text-[9px] flex items-center justify-center font-black flex-shrink-0 ${r.eligible?"bg-emerald-500 text-white":"bg-slate-300 text-slate-500"}`}>{i+1}</span>
+                        {r.option.split(" ").slice(-2).join(" ")}
+                      </div>
+                      {i<results.length-1&&<span className="text-slate-300 text-xs">›</span>}
                     </div>))}
                   </div>
                 </div>
-                {eligible.length===0&&<div className="bg-red-50 border border-red-200 rounded-lg p-4 text-sm text-red-800 font-semibold mb-3">⚠️ No eligible options. Review for adverse action / foreclosure.</div>}
-                <div className="text-xs font-bold uppercase text-green-700 mb-2">✅ Eligible Options — click to see full calculated terms</div>
+                {eligible.length===0&&<div className="bg-red-50 border border-red-200 rounded-xl p-4 text-sm text-red-800 font-bold mb-4">⚠️ No eligible options. Review for adverse action / foreclosure referral.</div>}
+                {eligible.length>0&&<div className="text-[10px] font-black uppercase tracking-widest text-slate-400 mb-3">Eligible Options — click to view calculated terms</div>}
                 {eligible.map((r,i)=>(
-                  <div key={i} className="bg-green-50 border border-green-200 rounded-lg mb-3">
-                    <button className="w-full text-left p-3 flex items-center justify-between" onClick={()=>setExpanded(expanded===`e${i}`?null:`e${i}`)}>
-                      <span className="font-bold text-sm text-green-900">{r.option}</span>
-                      <span className="text-green-600 text-xs font-semibold">{expanded===`e${i}`?"▲ Hide":"▼ View Calculated Terms"}</span>
+                  <div key={i} className="rounded-xl border border-emerald-200 overflow-hidden shadow-sm mb-3 transition-all hover:shadow-md">
+                    <button className="w-full text-left px-4 py-3 flex items-center justify-between bg-gradient-to-r from-emerald-50 to-white" onClick={()=>setExpanded(expanded===`e${i}`?null:`e${i}`)}>
+                      <div className="flex items-center gap-3">
+                        <div className="w-7 h-7 rounded-full bg-emerald-500 flex items-center justify-center text-white text-xs font-black flex-shrink-0">{i+1}</div>
+                        <div>
+                          <div className="font-bold text-sm text-slate-800">{r.option}</div>
+                          {r.note&&<div className="text-xs text-emerald-600 mt-0.5">{r.note}</div>}
+                        </div>
+                      </div>
+                      <span className={`text-xs font-bold px-2.5 py-1 rounded-full flex-shrink-0 transition-all ${expanded===`e${i}`?"bg-slate-200 text-slate-600":"bg-emerald-100 text-emerald-700"}`}>{expanded===`e${i}`?"▲ Hide":"View Terms ▼"}</span>
                     </button>
                     {expanded===`e${i}`&&(
-                      <div className="px-3 pb-3">
-                        {r.calc&&<div className="text-xs bg-blue-50 text-blue-800 rounded p-2 mb-2">📊 {r.calc}</div>}
-                        {r.note&&<div className="text-xs bg-yellow-50 text-yellow-800 rounded p-2 mb-2">📌 {r.note}</div>}
+                      <div className="px-4 pb-4 bg-white">
+                        {r.calc&&<div className="text-xs bg-blue-50 text-blue-700 rounded-lg px-3 py-2 mb-2 border border-blue-100">📊 {r.calc}</div>}
                         <CalcTermsPanel optionName={r.option} loan={loan}/>
                       </div>
                     )}
@@ -1355,18 +1380,29 @@ export default function App() {
                 ))}
               </>)}
             </div>
-            <div className="overflow-y-auto" style={{maxHeight:"80vh"}}>
+            <div className="overflow-y-auto" style={{maxHeight:"82vh"}}>
               {evaluated&&(<>
-                <div className="text-xs font-bold uppercase text-gray-500 mb-2">❌ Ineligible</div>
+                <div className="text-[10px] font-black uppercase tracking-widest text-slate-400 mb-3">Ineligible Options</div>
                 {ineligible.map((r,i)=>{
                   const fail=r.nodes?.find(nd=>!nd.pass);
-                  return(<div key={i} className="bg-white border border-gray-200 rounded-lg mb-1.5">
-                    <button className="w-full text-left p-2.5 flex items-center justify-between" onClick={()=>setExpanded(expanded===`n${i}`?null:`n${i}`)}>
-                      <div><div className="font-semibold text-xs text-gray-700">{r.option}</div>{fail&&<div className="text-xs text-red-500 mt-0.5">↳ {fail.question}: <em>{fail.answer}</em></div>}</div>
-                      <span className="text-gray-400 text-xs ml-2">{expanded===`n${i}`?"▲":"▼"}</span>
+                  return(<div key={i} className="bg-white border border-slate-200 rounded-xl mb-2 overflow-hidden shadow-sm">
+                    <button className="w-full text-left px-4 py-3 flex items-center justify-between" onClick={()=>setExpanded(expanded===`n${i}`?null:`n${i}`)}>
+                      <div className="flex items-start gap-2.5">
+                        <span className="w-5 h-5 rounded-full bg-slate-200 flex items-center justify-center text-slate-500 text-[10px] font-black flex-shrink-0 mt-0.5">✗</span>
+                        <div>
+                          <div className="font-semibold text-xs text-slate-700">{r.option}</div>
+                          {fail&&<div className="text-xs text-red-500 mt-0.5">↳ {fail.question}: <em>{fail.answer}</em></div>}
+                        </div>
+                      </div>
+                      <span className="text-slate-400 text-xs ml-2 flex-shrink-0">{expanded===`n${i}`?"▲":"▼"}</span>
                     </button>
-                    {expanded===`n${i}`&&<div className="px-3 pb-3 border-t border-gray-100">
-                      {r.nodes?.map((nd,j)=>(<div key={j} className={`flex items-start gap-1 py-0.5 text-xs ${nd.pass?"text-green-700":"text-red-600 font-semibold"}`}><span>{nd.pass?"✓":"✗"}</span><span>{nd.question}: <em>{nd.answer}</em></span></div>))}
+                    {expanded===`n${i}`&&<div className="px-4 pb-3 border-t border-slate-100 bg-slate-50/50">
+                      <div className="mt-2 space-y-1">
+                        {r.nodes?.map((nd,j)=>(<div key={j} className={`flex items-start gap-2 py-0.5 text-xs ${nd.pass?"text-emerald-700":"text-red-600 font-semibold"}`}>
+                          <span className="flex-shrink-0">{nd.pass?"✓":"✗"}</span>
+                          <span>{nd.question}: <em>{nd.answer}</em></span>
+                        </div>))}
+                      </div>
                     </div>}
                   </div>);
                 })}
@@ -1377,19 +1413,29 @@ export default function App() {
 
         {/* ── AUDIT ── */}
         {tab==="audit"&&(
-          <div className="overflow-y-auto" style={{maxHeight:"80vh"}}>
-            {!evaluated?<div className="bg-white rounded-lg shadow p-8 text-center text-gray-400">Run evaluation first</div>:(
+          <div className="overflow-y-auto" style={{maxHeight:"82vh"}}>
+            {!evaluated?<div className="bg-white rounded-2xl shadow-sm border border-slate-200 p-10 text-center text-slate-400"><div className="text-4xl mb-3">🔍</div><div className="font-semibold">Run evaluation first</div></div>:(
               <div className="space-y-2">
-                <div className="flex justify-between mb-3"><h2 className="font-bold text-gray-800">Audit Trail — {loan.loanType}</h2><span className="text-xs text-gray-500">{results.length} options · {eligible.length} eligible</span></div>
+                <div className="flex justify-between items-center mb-4">
+                  <h2 className="font-black text-slate-800 text-lg">Audit Trail — {loan.loanType}</h2>
+                  <span className="text-xs text-slate-500 bg-white border border-slate-200 rounded-full px-3 py-1 shadow-sm">{results.length} options · {eligible.length} eligible</span>
+                </div>
                 {results.map((r,i)=>(
-                  <div key={i} className={`rounded-lg border ${r.eligible?"border-green-300 bg-green-50":"border-gray-200 bg-white"}`}>
-                    <button className="w-full text-left p-3 flex items-center justify-between" onClick={()=>setExpandedAudit(expandedAudit===i?null:i)}>
-                      <div className="flex items-center gap-2"><span className={`text-xs font-bold px-2 py-0.5 rounded-full ${r.eligible?"bg-green-200 text-green-800":"bg-red-100 text-red-700"}`}>{r.eligible?"ELIGIBLE":"INELIGIBLE"}</span><span className="font-semibold text-sm">{i+1}. {r.option}</span></div>
-                      <span className="text-gray-400 text-xs">{expandedAudit===i?"▲":"▼"} {r.nodes?.length} nodes</span>
+                  <div key={i} className={`rounded-xl border overflow-hidden shadow-sm ${r.eligible?"border-emerald-200 bg-emerald-50/30":"border-slate-200 bg-white"}`}>
+                    <button className="w-full text-left px-4 py-3 flex items-center justify-between" onClick={()=>setExpandedAudit(expandedAudit===i?null:i)}>
+                      <div className="flex items-center gap-3">
+                        <span className={`text-[10px] font-black px-2.5 py-1 rounded-full ${r.eligible?"bg-emerald-500 text-white":"bg-red-100 text-red-700"}`}>{r.eligible?"ELIGIBLE":"INELIGIBLE"}</span>
+                        <span className="font-semibold text-sm text-slate-800">{i+1}. {r.option}</span>
+                      </div>
+                      <span className="text-slate-400 text-xs flex items-center gap-1">{r.nodes?.length} checks <span>{expandedAudit===i?"▲":"▼"}</span></span>
                     </button>
-                    {expandedAudit===i&&(<div className="px-4 pb-4 border-t border-gray-100">
+                    {expandedAudit===i&&(<div className="px-4 pb-4 border-t border-slate-100">
                       <div className="mt-3 space-y-1">
-                        {r.nodes?.map((nd,j)=>(<div key={j} className={`flex items-start gap-2 p-1.5 rounded text-xs ${nd.pass?"bg-green-50 text-green-800":"bg-red-50 text-red-700 font-semibold"}`}><span className="flex-shrink-0 font-bold">{nd.pass?"✓":"✗"}</span><span className="flex-1">{nd.question}</span><span className={`px-2 py-0.5 rounded flex-shrink-0 ${nd.pass?"bg-green-200":"bg-red-200"}`}>{nd.answer}</span></div>))}
+                        {r.nodes?.map((nd,j)=>(<div key={j} className={`flex items-center gap-2 p-2 rounded-lg text-xs ${nd.pass?"bg-emerald-50 text-emerald-800":"bg-red-50 text-red-700 font-semibold"}`}>
+                          <span className={`w-4 h-4 rounded-full flex items-center justify-center text-[9px] font-black flex-shrink-0 ${nd.pass?"bg-emerald-500 text-white":"bg-red-500 text-white"}`}>{nd.pass?"✓":"✗"}</span>
+                          <span className="flex-1">{nd.question}</span>
+                          <span className={`px-2 py-0.5 rounded-full text-[10px] font-bold flex-shrink-0 ${nd.pass?"bg-emerald-200 text-emerald-800":"bg-red-200 text-red-800"}`}>{nd.answer}</span>
+                        </div>))}
                       </div>
                       {r.eligible&&<CalcTermsPanel optionName={r.option} loan={loan}/>}
                     </div>)}
@@ -1403,32 +1449,41 @@ export default function App() {
         {/* ── REPORT ── */}
         {tab==="report"&&(
           <div className="max-w-3xl mx-auto">
-            {!evaluated?<div className="bg-white rounded-lg shadow p-8 text-center text-gray-400">Run evaluation first</div>:(<>
-              <div className="bg-white rounded-lg shadow p-6 mb-4">
-                <div className="flex justify-between items-start mb-4">
-                  <div><h2 className="text-xl font-bold">Loss Mitigation Evaluation</h2><p className="text-sm text-gray-500">{new Date().toLocaleDateString()} · {loan.loanType}{loan.loanNumber?" · Loan #"+loan.loanNumber:""}{loan.borrowerName?" · "+loan.borrowerName:""}</p></div>
-                  <button onClick={printReport} className="bg-blue-700 text-white text-xs px-3 py-1.5 rounded font-semibold">🖨 Print</button>
+            {!evaluated?<div className="bg-white rounded-2xl shadow-sm border border-slate-200 p-10 text-center text-slate-400"><div className="text-4xl mb-3">📄</div><div className="font-semibold">Run evaluation first</div></div>:(<>
+              <div className="bg-white rounded-2xl shadow-sm border border-slate-200 p-6 mb-4">
+                <div className="flex justify-between items-start mb-5">
+                  <div>
+                    <h2 className="text-xl font-black text-slate-800">Loss Mitigation Evaluation</h2>
+                    <p className="text-sm text-slate-500 mt-0.5">{new Date().toLocaleDateString()} · {loan.loanType}{loan.loanNumber?" · Loan #"+loan.loanNumber:""}{loan.borrowerName?" · "+loan.borrowerName:""}</p>
+                  </div>
+                  <button onClick={printReport} className="bg-slate-800 hover:bg-slate-900 text-white text-xs px-4 py-2 rounded-lg font-bold shadow-sm transition-all">🖨 Print</button>
                 </div>
-                <div className="grid grid-cols-3 md:grid-cols-5 gap-2 mb-4">
-                  {[["DLQ",loan.delinquencyMonths?loan.delinquencyMonths+"mo":"—"],["UPB",loan.upb?fmt$(n(loan.upb)):"—"],["GMI",gmi>0?"$"+Number(loan.grossMonthlyIncome).toLocaleString():"—"],["31% Target",target31?"$"+target31:"—"],["Eligible",eligible.length]].map(([k,v])=>(<div key={k} className="bg-gray-50 rounded p-2 text-center"><div className="text-xs text-gray-500">{k}</div><div className="font-bold text-xs text-gray-900">{v}</div></div>))}
+                <div className="grid grid-cols-5 gap-3 mb-5">
+                  {[["DLQ",loan.delinquencyMonths?loan.delinquencyMonths+"mo":"—","bg-orange-50 border-orange-200"],["UPB",loan.upb?fmt$(n(loan.upb)):"—","bg-blue-50 border-blue-200"],["GMI",gmi>0?"$"+Number(loan.grossMonthlyIncome).toLocaleString():"—","bg-purple-50 border-purple-200"],["31% Target",target31?"$"+target31:"—","bg-indigo-50 border-indigo-200"],["Eligible",eligible.length,eligible.length>0?"bg-emerald-50 border-emerald-200":"bg-red-50 border-red-200"]].map(([k,v,cls])=>(<div key={k} className={`rounded-xl p-3 text-center border ${cls}`}><div className="text-[10px] font-bold uppercase tracking-widest text-slate-400 mb-1">{k}</div><div className="font-black text-sm text-slate-800">{v}</div></div>))}
                 </div>
-                <div className="mb-4">
-                  <h3 className="font-bold text-gray-800 mb-2">✅ Eligible Options with Calculated Terms</h3>
-                  {eligible.length===0?<p className="text-sm text-red-600 font-bold">No eligible options. Adverse action / foreclosure referral required.</p>:
-                    eligible.map((r,i)=>(<div key={i} className="border border-green-200 rounded-lg mb-3"><div className="bg-green-700 text-white px-3 py-1.5 text-sm font-bold">{i+1}. {r.option}</div>{r.note&&<div className="px-3 py-1 text-xs bg-yellow-50 text-yellow-800">📌 {r.note}</div>}<CalcTermsPanel optionName={r.option} loan={loan}/></div>))}
+                <div className="mb-5">
+                  <h3 className="font-black text-slate-700 mb-3 flex items-center gap-2"><span className="w-5 h-5 rounded-full bg-emerald-500 text-white text-[10px] flex items-center justify-center font-black">✓</span> Eligible Options</h3>
+                  {eligible.length===0?<p className="text-sm text-red-600 font-bold bg-red-50 border border-red-200 rounded-xl p-4">No eligible options. Adverse action / foreclosure referral required.</p>:
+                    eligible.map((r,i)=>(<div key={i} className="border border-slate-200 rounded-xl mb-3 overflow-hidden shadow-sm"><div className="bg-gradient-to-r from-slate-700 to-slate-600 text-white px-4 py-2 text-sm font-bold">{i+1}. {r.option}</div>{r.note&&<div className="px-4 py-1.5 text-xs bg-amber-50 text-amber-800 border-b border-amber-100">📌 {r.note}</div>}<CalcTermsPanel optionName={r.option} loan={loan}/></div>))}
                 </div>
-                <div><h3 className="font-bold text-gray-800 mb-2">❌ Ineligible ({ineligible.length})</h3>
-                  {ineligible.map((r,i)=>{const f=r.nodes?.find(nd=>!nd.pass);return<div key={i} className="text-xs border border-gray-200 rounded p-2 mb-1"><span className="font-semibold">{r.option}</span>{f&&<span className="text-red-500"> — {f.question}: {f.answer}</span>}</div>;})}
+                <div>
+                  <h3 className="font-black text-slate-700 mb-3 flex items-center gap-2"><span className="w-5 h-5 rounded-full bg-red-400 text-white text-[10px] flex items-center justify-center font-black">✗</span> Ineligible ({ineligible.length})</h3>
+                  <div className="space-y-1.5">
+                    {ineligible.map((r,i)=>{const f=r.nodes?.find(nd=>!nd.pass);return<div key={i} className="text-xs border border-slate-200 rounded-lg px-3 py-2 bg-slate-50 flex items-start gap-2"><span className="text-slate-400 font-bold flex-shrink-0">✗</span><span className="font-semibold text-slate-700">{r.option}</span>{f&&<span className="text-red-500 ml-1">— {f.question}: {f.answer}</span>}</div>;})}
+                  </div>
                 </div>
               </div>
-              <div className="bg-white rounded-lg shadow p-6">
-                <div className="flex items-center justify-between mb-3"><h3 className="font-bold">🤖 AI Underwriting Assistant</h3><button onClick={askAI} disabled={aiLoading} className={`text-sm px-4 py-1.5 rounded font-semibold ${aiLoading?"bg-gray-300 text-gray-500":"bg-blue-700 text-white"}`}>{aiLoading?"Analyzing...":"Get AI Analysis"}</button></div>
-                <div className="mb-3"><label className="text-xs text-gray-500 block mb-1">Anthropic API Key (required — not stored)</label><input type="password" className="border border-gray-300 rounded px-2 py-1 text-sm w-full font-mono" value={apiKey} onChange={e=>setApiKey(e.target.value)} placeholder="sk-ant-..."/></div>
-                {aiLoading&&<div className="text-sm text-gray-500 italic animate-pulse">Analyzing...</div>}
-                {aiResponse&&<div className="text-sm text-gray-800 whitespace-pre-wrap bg-gray-50 rounded p-4 border border-gray-200 leading-relaxed">{aiResponse}</div>}
-                {!aiResponse&&!aiLoading&&<p className="text-xs text-gray-400">Get expert waterfall order, documentation checklist, and compliance notes.</p>}
+              <div className="bg-white rounded-2xl shadow-sm border border-slate-200 p-6">
+                <div className="flex items-center justify-between mb-4">
+                  <div><h3 className="font-black text-slate-800">🤖 AI Underwriting Assistant</h3><p className="text-xs text-slate-400 mt-0.5">Powered by Claude — expert waterfall analysis</p></div>
+                  <button onClick={askAI} disabled={aiLoading} className={`text-sm px-4 py-2 rounded-xl font-bold shadow-sm transition-all ${aiLoading?"bg-slate-200 text-slate-400 cursor-not-allowed":"bg-gradient-to-r from-blue-600 to-blue-700 hover:from-blue-700 hover:to-blue-800 text-white"}`}>{aiLoading?"⏳ Analyzing...":"✨ Get AI Analysis"}</button>
+                </div>
+                <div className="mb-4"><label className="text-[10px] font-bold uppercase tracking-widest text-slate-400 block mb-1.5">Anthropic API Key (not stored)</label><input type="password" className="border border-slate-200 rounded-xl px-3 py-2 text-sm w-full font-mono shadow-sm focus:outline-none focus:ring-2 focus:ring-blue-400" value={apiKey} onChange={e=>setApiKey(e.target.value)} placeholder="sk-ant-..."/></div>
+                {aiLoading&&<div className="text-sm text-slate-500 italic animate-pulse py-4 text-center">Analyzing loan data...</div>}
+                {aiResponse&&<div className="text-sm text-slate-800 whitespace-pre-wrap bg-slate-50 rounded-xl p-4 border border-slate-200 leading-relaxed">{aiResponse}</div>}
+                {!aiResponse&&!aiLoading&&<p className="text-xs text-slate-400 bg-slate-50 rounded-xl p-3 border border-slate-100">Enter your API key and click Analyze to get expert waterfall recommendations, documentation checklists, and compliance notes.</p>}
               </div>
-              <div className="mt-4 bg-yellow-50 border border-yellow-200 rounded-lg p-3 text-xs text-yellow-800"><strong>Disclaimer:</strong> Decision-support tool only. Final determinations must be confirmed by a qualified loss mitigation underwriter per current HUD, USDA, and VA guidelines.</div>
+              <div className="mt-4 bg-amber-50 border border-amber-200 rounded-xl p-3 text-xs text-amber-800"><strong>Disclaimer:</strong> Decision-support tool only. Final determinations must be confirmed by a qualified loss mitigation underwriter per current HUD, USDA, and VA guidelines.</div>
             </>)}
           </div>
         )}
@@ -1437,40 +1492,64 @@ export default function App() {
         {tab==="compare"&&(
           <div>
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-4">
-              <div className="bg-white rounded-lg shadow p-4">
-                <div className="flex items-center justify-between mb-2"><h3 className="font-bold text-blue-900">Loan A — {loan.loanType}</h3><span className={`text-xs px-2 py-0.5 rounded-full font-semibold ${evaluated?"bg-green-100 text-green-800":"bg-gray-100 text-gray-500"}`}>{evaluated?`${eligible.length} eligible`:"Not evaluated"}</span></div>
-                <div className="text-xs text-gray-500 space-y-0.5">{[["DLQ",loan.delinquencyMonths?loan.delinquencyMonths+" mo":"—"],["Hardship",loan.hardshipType+" ("+loan.hardshipDuration+")"],["UPB",loan.upb?fmt$(n(loan.upb)):"—"],["GMI",gmi>0?"$"+Number(loan.grossMonthlyIncome).toLocaleString():"—"]].map(([k,v])=><div key={k}>{k}: <strong>{v}</strong></div>)}</div>
-                {!evaluated&&<p className="text-xs text-yellow-600 italic mt-2">Evaluate on Inputs tab first.</p>}
+              {/* Loan A card */}
+              <div className="bg-white rounded-2xl border border-slate-200 shadow-sm p-5">
+                <div className="flex items-center justify-between mb-3">
+                  <div className="flex items-center gap-2">
+                    <div className="w-7 h-7 rounded-full bg-blue-500 flex items-center justify-center text-white text-xs font-black">A</div>
+                    <h3 className="font-bold text-slate-800">Loan A — {loan.loanType}</h3>
+                  </div>
+                  <span className={`text-xs px-2.5 py-1 rounded-full font-semibold ${evaluated?"bg-emerald-100 text-emerald-700":"bg-slate-100 text-slate-400"}`}>{evaluated?`${eligible.length} eligible`:"Not evaluated"}</span>
+                </div>
+                <div className="space-y-1.5">
+                  {[["DLQ",loan.delinquencyMonths?loan.delinquencyMonths+" mo":"—"],["Hardship",loan.hardshipType+" ("+loan.hardshipDuration+")"],["UPB",loan.upb?fmt$(n(loan.upb)):"—"],["GMI",gmi>0?"$"+Number(loan.grossMonthlyIncome).toLocaleString():"—"]].map(([k,v])=>(
+                    <div key={k} className="flex justify-between items-center py-1 border-b border-slate-50 last:border-0">
+                      <span className="text-xs text-slate-400 font-medium">{k}</span>
+                      <span className="text-xs font-semibold text-slate-700">{v}</span>
+                    </div>
+                  ))}
+                </div>
+                {!evaluated&&<p className="text-xs text-amber-600 italic mt-3 bg-amber-50 rounded-lg px-3 py-2">Evaluate on Inputs tab first.</p>}
               </div>
-              <div className="bg-white rounded-lg shadow p-4 overflow-y-auto" style={{maxHeight:"60vh"}}>
-                <div className="flex items-center justify-between mb-2"><h3 className="font-bold text-purple-900">Loan B — {loan2.loanType}</h3><div className="flex gap-2"><span className={`text-xs px-2 py-0.5 rounded-full font-semibold ${evaluated2?"bg-green-100 text-green-800":"bg-gray-100 text-gray-500"}`}>{evaluated2?`${results2.filter(r=>r.eligible).length} eligible`:"Not evaluated"}</span><button onClick={evaluate2} className="text-xs bg-purple-700 text-white px-3 py-1 rounded font-semibold">Evaluate B</button></div></div>
-                <div className="text-xs font-bold uppercase text-gray-400 mb-1">Loan Details</div>
-                <div className="grid grid-cols-2 gap-2 mb-2">
-                  {[["Loan Type","loanType",LOAN_TYPES],["Hardship Type","hardshipType",HARDSHIP_TYPES],["Hardship Duration","hardshipDuration",["Resolved","Long Term","Permanent","Short Term"]]].map(([label,key,opts])=><div key={key} className="col-span-1"><label className="text-xs text-gray-500">{label}</label><Sel value={loan2[key]} onChange={v=>set2(key,v)} options={opts}/></div>)}
-                  <div><label className="text-xs text-gray-500">DLQ (months)</label><Num value={loan2.delinquencyMonths} onChange={v=>set2("delinquencyMonths",v)} placeholder="e.g. 6"/></div>
-                  <div><label className="text-xs text-gray-500">GMI</label><Num value={loan2.grossMonthlyIncome} onChange={v=>set2("grossMonthlyIncome",v)} placeholder="e.g. 5000" prefix="$"/></div>
+              {/* Loan B card */}
+              <div className="bg-white rounded-2xl border border-slate-200 shadow-sm p-5 overflow-y-auto" style={{maxHeight:"60vh"}}>
+                <div className="flex items-center justify-between mb-3">
+                  <div className="flex items-center gap-2">
+                    <div className="w-7 h-7 rounded-full bg-violet-500 flex items-center justify-center text-white text-xs font-black">B</div>
+                    <h3 className="font-bold text-slate-800">Loan B — {loan2.loanType}</h3>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <span className={`text-xs px-2.5 py-1 rounded-full font-semibold ${evaluated2?"bg-emerald-100 text-emerald-700":"bg-slate-100 text-slate-400"}`}>{evaluated2?`${results2.filter(r=>r.eligible).length} eligible`:"Not evaluated"}</span>
+                    <button onClick={evaluate2} className="text-xs bg-violet-600 hover:bg-violet-700 text-white px-3 py-1.5 rounded-lg font-semibold transition-colors">Evaluate B</button>
+                  </div>
                 </div>
-                <div className="text-xs font-bold uppercase text-gray-400 mb-1 mt-2">Financials</div>
-                <div className="grid grid-cols-2 gap-2 mb-2">
-                  <div><label className="text-xs text-gray-500">Current UPB</label><Num value={loan2.upb} onChange={v=>set2("upb",v)} placeholder="e.g. 250000" prefix="$"/></div>
-                  <div><label className="text-xs text-gray-500">Original UPB</label><Num value={loan2.originalUpb} onChange={v=>set2("originalUpb",v)} placeholder="e.g. 275000" prefix="$"/></div>
-                  <div><label className="text-xs text-gray-500">Monthly Escrow</label><Num value={loan2.currentEscrow} onChange={v=>set2("currentEscrow",v)} placeholder="e.g. 400" prefix="$"/></div>
-                  <div><label className="text-xs text-gray-500">Monthly P&I</label><Num value={loan2.currentPI} onChange={v=>set2("currentPI",v)} placeholder="e.g. 1400" prefix="$"/></div>
-                  <div><label className="text-xs text-gray-500">Monthly PITI</label><Num value={loan2.currentPITI} onChange={v=>set2("currentPITI",v)} placeholder="e.g. 1800" prefix="$"/></div>
-                  <div><label className="text-xs text-gray-500">PMMS Rate (%)</label><Num value={loan2.pmmsRate} onChange={v=>set2("pmmsRate",v)} placeholder="e.g. 7.1"/></div>
-                  <div><label className="text-xs text-gray-500">Current Rate (%)</label><Num value={loan2.currentInterestRate} onChange={v=>set2("currentInterestRate",v)} placeholder="e.g. 6.5"/></div>
-                  <div><label className="text-xs text-gray-500">Arrearages</label><Num value={loan2.arrearagesToCapitalize} onChange={v=>set2("arrearagesToCapitalize",v)} placeholder="e.g. 7000" prefix="$"/></div>
-                  <div><label className="text-xs text-gray-500">Escrow Shortage</label><Num value={loan2.escrowShortage} onChange={v=>set2("escrowShortage",v)} placeholder="e.g. 800" prefix="$"/></div>
-                  <div><label className="text-xs text-gray-500">Legal Fees</label><Num value={loan2.legalFees} onChange={v=>set2("legalFees",v)} placeholder="e.g. 1200" prefix="$"/></div>
+                <div className="flex items-center gap-2 mb-2 mt-3"><div className="h-3.5 w-0.5 rounded-full bg-slate-300"/><span className="text-[10px] font-black uppercase tracking-widest text-slate-400">Loan Details</span></div>
+                <div className="grid grid-cols-2 gap-2 mb-3">
+                  {[["Loan Type","loanType",LOAN_TYPES],["Hardship Type","hardshipType",HARDSHIP_TYPES],["Hardship Duration","hardshipDuration",["Resolved","Long Term","Permanent","Short Term"]]].map(([label,key,opts])=><div key={key} className="col-span-1"><label className="text-xs text-slate-500 mb-0.5 block">{label}</label><Sel value={loan2[key]} onChange={v=>set2(key,v)} options={opts}/></div>)}
+                  <div><label className="text-xs text-slate-500 mb-0.5 block">DLQ (months)</label><Num value={loan2.delinquencyMonths} onChange={v=>set2("delinquencyMonths",v)} placeholder="e.g. 6"/></div>
+                  <div><label className="text-xs text-slate-500 mb-0.5 block">GMI</label><Num value={loan2.grossMonthlyIncome} onChange={v=>set2("grossMonthlyIncome",v)} placeholder="e.g. 5000" prefix="$"/></div>
                 </div>
-                <div className="text-xs font-bold uppercase text-gray-400 mb-1 mt-2">Loan Dates</div>
-                <div className="grid grid-cols-2 gap-2 mb-2">
-                  <div><label className="text-xs text-gray-500">Note First Payment</label><input type="date" className="border border-gray-300 rounded px-2 py-1 text-sm w-full" value={loan2.noteFirstPaymentDate} onChange={e=>set2("noteFirstPaymentDate",e.target.value)}/></div>
-                  <div><label className="text-xs text-gray-500">Note Term (months)</label><Num value={loan2.noteTerm} onChange={v=>set2("noteTerm",v)} placeholder="360"/></div>
-                  <div><label className="text-xs text-gray-500">Original Maturity</label><input type="date" className="border border-gray-300 rounded px-2 py-1 text-sm w-full" value={loan2.originalMaturityDate} onChange={e=>set2("originalMaturityDate",e.target.value)}/></div>
-                  <div><label className="text-xs text-gray-500">Effective Date</label><input type="date" className="border border-gray-300 rounded px-2 py-1 text-sm w-full" value={loan2.approvalEffectiveDate} onChange={e=>set2("approvalEffectiveDate",e.target.value)}/></div>
+                <div className="flex items-center gap-2 mb-2 mt-3"><div className="h-3.5 w-0.5 rounded-full bg-slate-300"/><span className="text-[10px] font-black uppercase tracking-widest text-slate-400">Financials</span></div>
+                <div className="grid grid-cols-2 gap-2 mb-3">
+                  <div><label className="text-xs text-slate-500 mb-0.5 block">Current UPB</label><Num value={loan2.upb} onChange={v=>set2("upb",v)} placeholder="e.g. 250000" prefix="$"/></div>
+                  <div><label className="text-xs text-slate-500 mb-0.5 block">Original UPB</label><Num value={loan2.originalUpb} onChange={v=>set2("originalUpb",v)} placeholder="e.g. 275000" prefix="$"/></div>
+                  <div><label className="text-xs text-slate-500 mb-0.5 block">Monthly Escrow</label><Num value={loan2.currentEscrow} onChange={v=>set2("currentEscrow",v)} placeholder="e.g. 400" prefix="$"/></div>
+                  <div><label className="text-xs text-slate-500 mb-0.5 block">Monthly P&I</label><Num value={loan2.currentPI} onChange={v=>set2("currentPI",v)} placeholder="e.g. 1400" prefix="$"/></div>
+                  <div><label className="text-xs text-slate-500 mb-0.5 block">Monthly PITI</label><Num value={loan2.currentPITI} onChange={v=>set2("currentPITI",v)} placeholder="e.g. 1800" prefix="$"/></div>
+                  <div><label className="text-xs text-slate-500 mb-0.5 block">PMMS Rate (%)</label><Num value={loan2.pmmsRate} onChange={v=>set2("pmmsRate",v)} placeholder="e.g. 7.1"/></div>
+                  <div><label className="text-xs text-slate-500 mb-0.5 block">Current Rate (%)</label><Num value={loan2.currentInterestRate} onChange={v=>set2("currentInterestRate",v)} placeholder="e.g. 6.5"/></div>
+                  <div><label className="text-xs text-slate-500 mb-0.5 block">Arrearages</label><Num value={loan2.arrearagesToCapitalize} onChange={v=>set2("arrearagesToCapitalize",v)} placeholder="e.g. 7000" prefix="$"/></div>
+                  <div><label className="text-xs text-slate-500 mb-0.5 block">Escrow Shortage</label><Num value={loan2.escrowShortage} onChange={v=>set2("escrowShortage",v)} placeholder="e.g. 800" prefix="$"/></div>
+                  <div><label className="text-xs text-slate-500 mb-0.5 block">Legal Fees</label><Num value={loan2.legalFees} onChange={v=>set2("legalFees",v)} placeholder="e.g. 1200" prefix="$"/></div>
                 </div>
-                <div className="text-xs font-bold uppercase text-gray-400 mb-1 mt-2">Eligibility Flags</div>
+                <div className="flex items-center gap-2 mb-2 mt-3"><div className="h-3.5 w-0.5 rounded-full bg-slate-300"/><span className="text-[10px] font-black uppercase tracking-widest text-slate-400">Loan Dates</span></div>
+                <div className="grid grid-cols-2 gap-2 mb-3">
+                  <div><label className="text-xs text-slate-500 mb-0.5 block">Note First Payment</label><input type="date" className="border border-slate-200 rounded-lg px-2 py-1.5 text-sm w-full focus:outline-none focus:ring-2 focus:ring-blue-400" value={loan2.noteFirstPaymentDate} onChange={e=>set2("noteFirstPaymentDate",e.target.value)}/></div>
+                  <div><label className="text-xs text-slate-500 mb-0.5 block">Note Term (months)</label><Num value={loan2.noteTerm} onChange={v=>set2("noteTerm",v)} placeholder="360"/></div>
+                  <div><label className="text-xs text-slate-500 mb-0.5 block">Original Maturity</label><input type="date" className="border border-slate-200 rounded-lg px-2 py-1.5 text-sm w-full focus:outline-none focus:ring-2 focus:ring-blue-400" value={loan2.originalMaturityDate} onChange={e=>set2("originalMaturityDate",e.target.value)}/></div>
+                  <div><label className="text-xs text-slate-500 mb-0.5 block">Effective Date</label><input type="date" className="border border-slate-200 rounded-lg px-2 py-1.5 text-sm w-full focus:outline-none focus:ring-2 focus:ring-blue-400" value={loan2.approvalEffectiveDate} onChange={e=>set2("approvalEffectiveDate",e.target.value)}/></div>
+                </div>
+                <div className="flex items-center gap-2 mb-2 mt-3"><div className="h-3.5 w-0.5 rounded-full bg-slate-300"/><span className="text-[10px] font-black uppercase tracking-widest text-slate-400">Eligibility Flags</span></div>
                 <div className="space-y-1">
                   <Tog label="Continuous Income" value={loan2.continuousIncome} onChange={v=>set2("continuousIncome",v)}/>
                   <Tog label="Target achievable by re-amortizing" value={loan2.canAchieveTargetByReamort} onChange={v=>set2("canAchieveTargetByReamort",v)}/>
@@ -1486,12 +1565,21 @@ export default function App() {
               const all=[...new Set([...results.map(r=>r.option),...results2.map(r=>r.option)])];
               const a=Object.fromEntries(results.map(r=>[r.option,r.eligible]));
               const b=Object.fromEntries(results2.map(r=>[r.option,r.eligible]));
-              return(<div className="bg-white rounded-lg shadow overflow-hidden">
-                <div className="bg-gray-800 text-white px-4 py-2 text-sm font-bold">Side-by-Side Comparison</div>
+              const aCount=results.filter(r=>r.eligible).length;
+              const bCount=results2.filter(r=>r.eligible).length;
+              return(<div className="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden">
+                <div className="bg-gradient-to-r from-slate-800 to-slate-700 text-white px-5 py-3 flex items-center justify-between">
+                  <span className="text-sm font-bold tracking-tight">Side-by-Side Comparison</span>
+                  <div className="flex items-center gap-3 text-xs">
+                    <span className="flex items-center gap-1.5"><span className="w-5 h-5 rounded-full bg-blue-500 flex items-center justify-center font-black text-[10px]">A</span><span className="text-slate-300">{aCount} eligible</span></span>
+                    <span className="text-slate-500">vs</span>
+                    <span className="flex items-center gap-1.5"><span className="w-5 h-5 rounded-full bg-violet-500 flex items-center justify-center font-black text-[10px]">B</span><span className="text-slate-300">{bCount} eligible</span></span>
+                  </div>
+                </div>
                 <div className="overflow-x-auto"><table className="w-full text-xs">
-                  <thead><tr className="bg-gray-50 border-b"><th className="text-left p-3 font-semibold">Option</th><th className="text-center p-3 w-28 text-blue-800 font-semibold">A ({loan.loanType})</th><th className="text-center p-3 w-28 text-purple-800 font-semibold">B ({loan2.loanType})</th><th className="text-center p-3 w-24 text-gray-600 font-semibold">Delta</th></tr></thead>
-                  <tbody>{all.map((opt,i)=>{const aV=a[opt],bV=b[opt];return(<tr key={i} className={`border-b ${aV&&bV?"bg-green-50":(!aV&&!bV)?"":"bg-yellow-50"}`}><td className="p-3 font-medium">{opt}</td><td className="p-3 text-center">{aV===undefined?"—":aV?<span className="text-green-700 font-bold">✓</span>:<span className="text-red-500">✗</span>}</td><td className="p-3 text-center">{bV===undefined?"—":bV?<span className="text-green-700 font-bold">✓</span>:<span className="text-red-500">✗</span>}</td><td className="p-3 text-center">{aV&&bV?<span className="text-green-600 font-semibold">Both</span>:(!aV&&!bV)?<span className="text-gray-400">Neither</span>:(aV&&!bV)?<span className="text-blue-700 font-semibold">A only</span>:<span className="text-purple-700 font-semibold">B only</span>}</td></tr>);})}</tbody>
-                  <tfoot><tr className="bg-gray-50 border-t-2 border-gray-300"><td className="p-3 font-bold">Total Eligible</td><td className="p-3 text-center font-bold text-blue-800">{results.filter(r=>r.eligible).length}</td><td className="p-3 text-center font-bold text-purple-800">{results2.filter(r=>r.eligible).length}</td><td className="p-3 text-center text-xs text-gray-500">{results.filter(r=>r.eligible).length>results2.filter(r=>r.eligible).length?"A has more":results2.filter(r=>r.eligible).length>results.filter(r=>r.eligible).length?"B has more":"Equal"}</td></tr></tfoot>
+                  <thead><tr className="bg-slate-50 border-b border-slate-200"><th className="text-left px-4 py-2.5 font-semibold text-slate-600">Option</th><th className="text-center px-4 py-2.5 w-28 text-blue-700 font-semibold">A ({loan.loanType})</th><th className="text-center px-4 py-2.5 w-28 text-violet-700 font-semibold">B ({loan2.loanType})</th><th className="text-center px-4 py-2.5 w-24 text-slate-500 font-semibold">Delta</th></tr></thead>
+                  <tbody>{all.map((opt,i)=>{const aV=a[opt],bV=b[opt];return(<tr key={i} className={`border-b border-slate-100 ${aV&&bV?"bg-emerald-50/60":(!aV&&!bV)?"":"bg-amber-50/60"}`}><td className="px-4 py-2.5 font-medium text-slate-700">{opt}</td><td className="px-4 py-2.5 text-center">{aV===undefined?"—":aV?<span className="inline-flex items-center justify-center w-5 h-5 rounded-full bg-emerald-100 text-emerald-700 font-black text-[10px]">✓</span>:<span className="inline-flex items-center justify-center w-5 h-5 rounded-full bg-red-100 text-red-600 font-black text-[10px]">✗</span>}</td><td className="px-4 py-2.5 text-center">{bV===undefined?"—":bV?<span className="inline-flex items-center justify-center w-5 h-5 rounded-full bg-emerald-100 text-emerald-700 font-black text-[10px]">✓</span>:<span className="inline-flex items-center justify-center w-5 h-5 rounded-full bg-red-100 text-red-600 font-black text-[10px]">✗</span>}</td><td className="px-4 py-2.5 text-center">{aV&&bV?<span className="px-2 py-0.5 rounded-full bg-emerald-100 text-emerald-700 font-semibold">Both</span>:(!aV&&!bV)?<span className="text-slate-300">Neither</span>:(aV&&!bV)?<span className="px-2 py-0.5 rounded-full bg-blue-100 text-blue-700 font-semibold">A only</span>:<span className="px-2 py-0.5 rounded-full bg-violet-100 text-violet-700 font-semibold">B only</span>}</td></tr>);})}</tbody>
+                  <tfoot><tr className="bg-slate-50 border-t-2 border-slate-200"><td className="px-4 py-3 font-bold text-slate-700">Total Eligible</td><td className="px-4 py-3 text-center font-black text-blue-700 text-sm">{aCount}</td><td className="px-4 py-3 text-center font-black text-violet-700 text-sm">{bCount}</td><td className="px-4 py-3 text-center"><span className={`px-2.5 py-1 rounded-full text-xs font-semibold ${aCount>bCount?"bg-blue-100 text-blue-700":bCount>aCount?"bg-violet-100 text-violet-700":"bg-slate-100 text-slate-500"}`}>{aCount>bCount?"A wins":bCount>aCount?"B wins":"Tied"}</span></td></tr></tfoot>
                 </table></div>
               </div>);
             })()}
