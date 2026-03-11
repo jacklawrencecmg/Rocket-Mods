@@ -2478,8 +2478,7 @@ export default function App() {
         if(data){ setProfile(data as Profile); }
         else { setScreen("pending"); }
       }
-      setAuthReady(true);
-    });
+    }).catch(()=>{}).finally(()=>setAuthReady(true));
     const {data:{subscription}}=supabase.auth.onAuthStateChange(async(_,session)=>{
       if(!session){ setProfile(null); setScreen("login"); return; }
       const {data}=await supabase.from("profiles").select("*").eq("id",session.user.id).single();
