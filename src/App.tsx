@@ -2032,7 +2032,7 @@ function MainApp({profile,onSignOut}:{profile:Profile;onSignOut:()=>void}) {
               <Sec title="📐 Amounts to Capitalize / Defer">
                 <F label="Arrearages (past-due P&I + escrow advances — total for capitalization)"><Num value={loan.arrearagesToCapitalize} onChange={v=>set("arrearagesToCapitalize",v)} placeholder="e.g. 7200" prefix="$"/></F>
                 <F label="Escrow Advance Balance (servicer-paid taxes/insurance — included in Payment Deferral)"><Num value={loan.escrowAdvanceBalance} onChange={v=>set("escrowAdvanceBalance",v)} placeholder="e.g. 0" prefix="$"/></F>
-                <F label="Accrued Delinquent Interest (for SMDU reconciliation)"><Num value={loan.accruedDelinquentInterest} onChange={v=>set("accruedDelinquentInterest",v)} placeholder="e.g. 0" prefix="$"/></F>
+                <F label="Accrued Delinquent Interest"><Num value={loan.accruedDelinquentInterest} onChange={v=>set("accruedDelinquentInterest",v)} placeholder="e.g. 0" prefix="$"/></F>
                 <F label="Suspense / Unapplied Funds (offsets deferred amount)"><Num value={loan.suspenseBalance} onChange={v=>set("suspenseBalance",v)} placeholder="e.g. 0" prefix="$"/></F>
                 <F label="Projected Escrow Shortage (NOT capitalized — spread over 60 months)"><Num value={loan.escrowShortage} onChange={v=>set("escrowShortage",v)} placeholder="e.g. 800" prefix="$"/></F>
                 <F label="Legal / Foreclosure Fees (actually performed)"><Num value={loan.legalFees} onChange={v=>set("legalFees",v)} placeholder="e.g. 1200" prefix="$"/></F>
