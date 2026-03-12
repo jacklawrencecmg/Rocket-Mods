@@ -67,6 +67,7 @@ const initLoan = {
   usdaPriorWorkoutCompSaleFailed:false,
   // FNMA
   fnmaLoanAge:"24",
+  fnmaPriorDeferredUPB:"0",
   fnmaPropertyType:"Principal Residence",
   fnmaHardshipResolved:false,
   fnmaCanResumeFull:false,
@@ -1186,19 +1187,38 @@ function calcApprovalTerms(optionName, l) {
   }
   // ── FNMA Payment Deferral ──
   if (opt === "FNMA Payment Deferral") {
+    const currentPI_val = n(l.currentPI);
     const deferMonths = Math.min(n(l.delinquencyMonths), 6);
     const cumUsed = n(l.fnmaCumulativeDeferredMonths);
     const cumRemaining = Math.max(0, 12 - cumUsed);
     const effectiveDeferMonths = Math.min(deferMonths, cumRemaining);
+    // Estimated total forbearance = delinquent months × P&I (SMDU approach)
+    const estTotalForbearance = currentPI_val > 0 ? effectiveDeferMonths * currentPI_val : null;
+    // Post-workout UPB = UPB minus the principal component of deferred payments
+    // Approximate: deferred interest = UPB × (monthlyRate) × months; deferred principal = remainder
+    const monthlyRate = currentRate > 0 ? currentRate / 100 / 12 : 0;
+    let estDeferredPrincipal = 0;
+    let runningUPB = upb;
+    for (let i = 0; i < effectiveDeferMonths; i++) {
+      const intPortion = runningUPB * monthlyRate;
+      const prinPortion = currentPI_val > 0 ? Math.max(0, currentPI_val - intPortion) : 0;
+      estDeferredPrincipal += prinPortion;
+      runningUPB -= prinPortion;
+    }
+    const estPostWorkoutUPB = upb - estDeferredPrincipal;
+    const cumulativeAfter = cumUsed + effectiveDeferMonths;
     return {
-      "Deferred Amount": fmt$(arrears),
-      "  → Past-Due P&I Payments": `Up to ${effectiveDeferMonths} months (delinquency: ${deferMonths}mo; cap remaining: ${cumRemaining}mo)`,
+      "Deferred Amount (Est.)": estTotalForbearance != null ? fmt$(estTotalForbearance) : fmt$(arrears),
+      "  → Est. Deferred Principal": currentPI_val > 0 && currentRate > 0 ? fmt$(estDeferredPrincipal) : "Enter current P&I and rate",
+      "  → Est. Deferred Interest": currentPI_val > 0 && currentRate > 0 && estTotalForbearance != null ? fmt$(estTotalForbearance - estDeferredPrincipal) : "Enter current P&I and rate",
+      "  → Months Deferred": `${effectiveDeferMonths} months (delinquency: ${deferMonths}mo; cap remaining: ${cumRemaining}mo)`,
       "  → Out-of-Pocket Escrow Advances": "Included (third-party advances paid prior to effective date)",
       "  → Escrow Shortage": escShortage > 0 ? `${fmt$(escShortage)} — repaid over 60-month escrow analysis (NOT deferred)` : "None",
-      "Cumulative Cap": `${cumUsed} months used / 12-month lifetime cap (excludes disaster deferrals)`,
+      "Post-Workout UPB (Est.)": currentPI_val > 0 && currentRate > 0 ? fmt$(estPostWorkoutUPB) : "Enter current P&I and rate",
+      "P&I Payment After Deferral": currentPI_val > 0 ? `${fmt$(currentPI_val)} — UNCHANGED (no modification to rate, term, or payment)` : "Full contractual monthly payment — no change",
+      "Cumulative Cap": `${cumUsed} months used → ${cumulativeAfter} after this deferral / 12-month lifetime cap (disaster deferrals excluded)`,
       "Interest on Deferred Balance": "None — non-interest-bearing balance",
       "Deferred Balance Due": "At maturity, sale/transfer, refinance, or payoff of interest-bearing UPB",
-      "First Payment After Deferral": "Full contractual monthly payment (no change to rate/term/other terms)",
       "Late Charges": "All waived upon completion",
       "Administrative Fees": "None",
       "Post-Deferral Default Risk": "If 60-day DLQ within 6 months → evaluate for Flex Modification by 75th DLQ day",
@@ -1226,29 +1246,59 @@ function calcApprovalTerms(optionName, l) {
   }
   // ── Fannie Mae Flex Modification ──
   if (opt === "Fannie Mae Flex Modification" || opt === "Fannie Mae Flex Modification (Disaster)") {
-    // Flex Mod: arrearages + legal fees capitalized; escrow shortage NOT capitalized
-    const flexNewUPB = upb + arrears + legal;
+    // Flex Mod: prior deferred balance + servicer UPB = SMDU pre-workout UPB; arrearages + legal fees capitalized; escrow shortage NOT capitalized
+    const priorDeferredUPB = n(l.fnmaPriorDeferredUPB);
+    const preWorkoutUPB = upb + priorDeferredUPB; // SMDU pre-workout UPB (servicer UPB + prior deferred balance)
+    const flexNewUPB = preWorkoutUPB + arrears + legal; // post-capitalization UPB
     const currentPI_val = n(l.currentPI);
     const floorRate = pmms > 0 ? Math.max(pmms - 0.50, 4.625) : 4.625;
+    // Rate can only be REDUCED — never increased. If current rate < floor, rate stays at current.
+    const effectiveRate = currentRate > 0 ? Math.min(floorRate, currentRate) : floorRate;
+    const rateAtFloor = currentRate > 0 && currentRate <= floorRate;
     // Step 1: Re-amortize at current rate for remaining term
     const step1PI = remainingTerm && currentRate > 0 && flexNewUPB > 0 ? calcMonthlyPI(flexNewUPB, currentRate, remainingTerm) : null;
-    // Step 2: Rate reduced to floor rate, same remaining term
-    const step2PI = remainingTerm && floorRate > 0 && flexNewUPB > 0 ? calcMonthlyPI(flexNewUPB, floorRate, remainingTerm) : null;
-    // Step 3: Extend term to 480 months at floor rate
-    const step3PI = floorRate > 0 && flexNewUPB > 0 ? calcMonthlyPI(flexNewUPB, floorRate, 480) : null;
-    // Target: pre-mod P&I (for ≥31 DLQ must be ≤; conceptually target 20% reduction)
+    // Step 2: Rate reduced to effective rate (min of floor and current), same remaining term
+    const step2PI = remainingTerm && effectiveRate > 0 && flexNewUPB > 0 ? calcMonthlyPI(flexNewUPB, effectiveRate, remainingTerm) : null;
+    // Step 3: Extend term to 480 months at effective rate
+    const step3PI = effectiveRate > 0 && flexNewUPB > 0 ? calcMonthlyPI(flexNewUPB, effectiveRate, 480) : null;
+    // Target: 20% reduction from pre-mod P&I
     const targetPI20 = currentPI_val > 0 ? currentPI_val * 0.80 : null;
-    // Determine which step meets the target (20% reduction benchmark)
+    // Step 4: Principal Forbearance — applied when steps 1–3 fail to achieve 20% reduction
+    // Forbearance = UPB needed to reach target at step3 terms; capped at 30% of post-cap UPB
+    const r480 = effectiveRate / 100 / 12;
+    const factor480 = r480 > 0 ? (r480 * Math.pow(1+r480, 480)) / (Math.pow(1+r480, 480) - 1) : (1/480);
+    const targetUPBForPF = targetPI20 != null && factor480 > 0 ? targetPI20 / factor480 : null;
+    const rawForbearance = targetUPBForPF != null ? Math.max(0, flexNewUPB - targetUPBForPF) : null;
+    const maxForbearance = flexNewUPB * 0.30;
+    const principalForbearance = rawForbearance != null ? Math.min(rawForbearance, maxForbearance) : null;
+    const step4UPB = principalForbearance != null ? flexNewUPB - principalForbearance : null;
+    const step4PI = step4UPB != null && effectiveRate > 0 ? calcMonthlyPI(step4UPB, effectiveRate, 480) : null;
+    // Determine which step is applied
     let stepApplied = "", achievedRate = currentRate, achievedTerm = remainingTerm || 360, achievedPI = step1PI;
+    let appliedForbearance = 0;
+    let interestBearingUPB = flexNewUPB;
     if (step1PI != null && targetPI20 != null && step1PI <= targetPI20) {
-      stepApplied = "Step 1: Re-amortize at current rate — target met";
+      stepApplied = "Step 1: Re-amortize at current rate — 20% target met";
       achievedRate = currentRate; achievedTerm = remainingTerm || 360; achievedPI = step1PI;
     } else if (step2PI != null && targetPI20 != null && step2PI <= targetPI20) {
-      stepApplied = "Step 2: Rate reduced to floor rate — target met";
-      achievedRate = floorRate; achievedTerm = remainingTerm || 360; achievedPI = step2PI;
+      stepApplied = rateAtFloor ? "Step 2: Rate stays at current (already at/below floor) — 20% target met" : "Step 2: Rate reduced to floor rate — 20% target met";
+      achievedRate = effectiveRate; achievedTerm = remainingTerm || 360; achievedPI = step2PI;
+    } else if (step3PI != null && targetPI20 != null && step3PI <= targetPI20) {
+      stepApplied = "Step 3: Term extended to 480 months — 20% target met";
+      achievedRate = effectiveRate; achievedTerm = 480; achievedPI = step3PI;
+    } else if (step4PI != null) {
+      achievedRate = effectiveRate; achievedTerm = 480;
+      appliedForbearance = principalForbearance ?? 0;
+      interestBearingUPB = step4UPB ?? flexNewUPB;
+      achievedPI = step4PI;
+      if (rawForbearance != null && principalForbearance != null && rawForbearance > maxForbearance) {
+        stepApplied = "Step 4: Principal Forbearance (30% cap applied — full 20% target may not be achieved)";
+      } else {
+        stepApplied = "Step 4: Principal Forbearance applied — 20% target met";
+      }
     } else {
-      stepApplied = step3PI != null ? "Step 3: Term extended to 480 months at floor rate" : "Steps 1–3 attempted";
-      achievedRate = floorRate; achievedTerm = 480; achievedPI = step3PI;
+      stepApplied = "Enter loan data for step analysis";
+      achievedRate = effectiveRate; achievedTerm = 480; achievedPI = step3PI;
     }
     const achievedPITI = achievedPI != null ? achievedPI + escrow : null;
     const piReductionPct = currentPI_val > 0 && achievedPI != null ? (currentPI_val - achievedPI) / currentPI_val * 100 : null;
@@ -1259,20 +1309,26 @@ function calcApprovalTerms(optionName, l) {
     return {
       "Modification Type": "Fannie Mae Flex Modification — Fixed Rate",
       "Step Applied": stepApplied || "Enter loan data for step analysis",
+      "Pre-Workout UPB": priorDeferredUPB > 0 ? `${fmt$(preWorkoutUPB)} (servicer UPB ${fmt$(upb)} + prior deferred ${fmt$(priorDeferredUPB)})` : fmt$(upb),
       "Capitalized Amount": fmt$(arrears + legal),
       "  → Arrearages": fmt$(arrears),
       "  → Legal Fees": fmt$(legal),
       "  → Escrow Shortage (EXCLUDED)": escShortage > 0 ? `${fmt$(escShortage)} — NOT capitalized per D2-3.2-06` : "None",
       "  → Late Fees (EXCLUDED)": lateFees > 0 ? `${fmt$(lateFees)} — NOT capitalized` : "None",
-      "New UPB": fmt$(flexNewUPB),
-      "Floor Rate (max of PMMS−50bps or 4.625%)": pmms > 0 ? fmtPct(floorRate) : "Enter PMMS rate",
+      "Post-Cap UPB": fmt$(flexNewUPB),
+      "Floor Rate (PMMS−50bps, min 4.625%)": pmms > 0 ? fmtPct(floorRate) : "Enter PMMS rate",
+      "Rate Note": rateAtFloor && currentRate > 0 ? `Current rate ${fmtPct(currentRate)} is at or below floor — rate stays unchanged (rate can only be reduced, not increased)` : `Current rate ${currentRate > 0 ? fmtPct(currentRate) : "N/A"} → reduced to floor if needed`,
       "New Interest Rate": achievedRate > 0 ? fmtPct(achievedRate) : "N/A",
       "New Term": achievedTerm ? `${achievedTerm} months (${(achievedTerm/12).toFixed(1)} years)` : "N/A",
+      "Principal Forbearance (Step 4)": appliedForbearance > 0 ? `${fmt$(appliedForbearance)} — non-interest-bearing; due at payoff/sale/maturity/refinance` : "Not required (target met in Steps 1–3)",
+      "  → Interest-Bearing UPB": appliedForbearance > 0 ? fmt$(interestBearingUPB) : "N/A",
+      "  → Total Mod UPB (interest + forbearance)": appliedForbearance > 0 ? fmt$(flexNewUPB) : "N/A",
+      "  → 30% Forbearance Cap": appliedForbearance > 0 ? fmt$(maxForbearance) : "N/A",
       "New Monthly P&I": fmt$(achievedPI),
       "New Monthly Escrow": fmt$(escrow || null),
       "New Monthly PITI": fmt$(achievedPITI),
       "P&I Reduction": piReductionPct != null ? `${piReductionPct.toFixed(1)}% (${fmt$(currentPI_val)} → ${fmt$(achievedPI)})` : "Enter current P&I",
-      "P&I Reduction ≥ 20%?": piReductionPct != null ? (piReductionPct >= 20 ? `✅ Yes — ${piReductionPct.toFixed(1)}%` : `❌ No — ${piReductionPct.toFixed(1)}% (principal forbearance may be required if MTMLTV > 100%)`) : "Enter current P&I",
+      "P&I Reduction ≥ 20%?": piReductionPct != null ? (piReductionPct >= 20 ? `✅ Yes — ${piReductionPct.toFixed(1)}%` : `❌ No — ${piReductionPct.toFixed(1)}%`) : "Enter current P&I",
       "New Maturity Date": fmtDate(newMaturity),
       "New First Payment Date": fmtDate(newFirstPmt),
       "Trial Period Plan": tppMonths,
@@ -1616,11 +1672,12 @@ function evaluateFNMA(l) {
     const eligPriorDeferral = priorDeferralMonths === 0 || priorDeferralMonths >= 12;
     const eligNotNearMaturity = !l.fnmaWithin36MonthsMaturity;
     const eligNoFailedTPP = !l.fnmaFailedTPP12Months;
+    const eligHardship = l.fnmaHardshipResolved || l.fnmaImminentDefault;
     const nodes = [
       node("Conventional 1st lien", l.lienPosition, eligLienPos),
       node("Loan age ≥ 12 months", loanAge+"mo", eligLoanAge),
       node("DLQ 2–6 months at evaluation", dlq+"mo", eligDlqRange),
-      node("Hardship resolved", l.fnmaHardshipResolved?"Yes":"No", l.fnmaHardshipResolved),
+      node("Hardship resolved OR servicer imminent default determination", l.fnmaHardshipResolved?"Resolved":l.fnmaImminentDefault?"Imminent Default":"Neither", eligHardship),
       node("Can resume full contractual payment", l.fnmaCanResumeFull?"Yes":"No", l.fnmaCanResumeFull),
       node("Cannot reinstate or afford repayment plan", l.fnmaCannotReinstate?"Yes":"No", l.fnmaCannotReinstate),
       node("Cumulative deferred months < 12 (lifetime)", cumulativeDeferred+"mo", eligCumCap),
@@ -2115,8 +2172,9 @@ function MainApp({profile,onSignOut}:{profile:Profile;onSignOut:()=>void}) {
                   <Tog label="Within 36 months of maturity or projected payoff" value={loan.fnmaWithin36MonthsMaturity} onChange={v=>set("fnmaWithin36MonthsMaturity",v)}/>
                 </Sec>
                 <Sec title="FNMA – Prior Workout History">
+                  <F label="Prior deferred balance (non-interest-bearing forbearance from prior deferrals — added to UPB for Flex Mod)"><Num value={loan.fnmaPriorDeferredUPB} onChange={v=>set("fnmaPriorDeferredUPB",v)} placeholder="0" prefix="$"/></F>
                   <F label="Months since last non-disaster payment deferral (0 = never)"><Num value={loan.fnmaPriorDeferralMonths} onChange={v=>set("fnmaPriorDeferralMonths",v)} placeholder="0 = never"/></F>
-                  <F label="Cumulative months deferred (lifetime total)"><Num value={loan.fnmaCumulativeDeferredMonths} onChange={v=>set("fnmaCumulativeDeferredMonths",v)} placeholder="0"/></F>
+                  <F label="Cumulative months deferred (lifetime total, prior to this evaluation)"><Num value={loan.fnmaCumulativeDeferredMonths} onChange={v=>set("fnmaCumulativeDeferredMonths",v)} placeholder="0"/></F>
                   <F label="Prior modifications (count — deferrals excluded from count)"><Num value={loan.fnmaPriorModCount} onChange={v=>set("fnmaPriorModCount",v)} placeholder="0"/></F>
                   <Tog label="Failed Flex Mod TPP within 12 months" value={loan.fnmaFailedTPP12Months} onChange={v=>set("fnmaFailedTPP12Months",v)}/>
                   <Tog label="60+ day re-default within 12 months of last Flex Mod" value={loan.fnmaReDefaulted12Months} onChange={v=>set("fnmaReDefaulted12Months",v)}/>
