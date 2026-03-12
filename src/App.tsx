@@ -17,6 +17,7 @@ const initLoan = {
   upb:"", originalUpb:"", currentEscrow:"", currentPI:"", currentPITI:"",
   grossMonthlyIncome:"", currentInterestRate:"", pmmsRate:"", modifiedPI:"",
   arrearagesToCapitalize:"", escrowShortage:"", legalFees:"", lateFees:"",
+  escrowAdvanceBalance:"", accruedDelinquentInterest:"", suspenseBalance:"",
   priorPartialClaimBalance:"", partialClaimPct:"",
   targetPayment:"",
   // Dates
@@ -93,6 +94,7 @@ const initLoan = {
   fhlmcHardshipResolved:false,
   fhlmcCanResumeFull:false,
   fhlmcImminentDefault:false,
+  fhlmcPriorDeferredUPB:"0",
   fhlmcLoanAge:"24",
   fhlmcMortgageType:"Conventional", // Conventional, FHA, VA, RHS
   fhlmcPropertyType:"Primary Residence", // Primary Residence, Second Home, Investment Property
@@ -193,6 +195,9 @@ function calcApprovalTerms(optionName, l) {
   const escShortage = n(l.escrowShortage);
   const legal = n(l.legalFees);
   const lateFees = n(l.lateFees);
+  const escrowAdv = n(l.escrowAdvanceBalance);
+  const accruedInterest = n(l.accruedDelinquentInterest);
+  const suspense = n(l.suspenseBalance);
   const priorPC = n(l.priorPartialClaimBalance);
   const pcPct = n(l.partialClaimPct);
   const pmms = n(l.pmmsRate);
@@ -966,10 +971,16 @@ function calcApprovalTerms(optionName, l) {
   }
   // ── FHLMC Payment Deferral ──
   if (opt === "FHLMC Payment Deferral") {
+    const currentPI_val = n(l.currentPI);
+    const fhlmcDeferMonths = Math.min(dlqMonths, 6);
+    const estPIForbearance = currentPI_val > 0 ? fhlmcDeferMonths * currentPI_val : null;
+    const estTotalForbearance = estPIForbearance != null ? estPIForbearance + escrowAdv : null;
+    const estNetForbearance = estTotalForbearance != null ? Math.max(0, estTotalForbearance - suspense) : null;
     return {
-      "Deferred Amount": fmt$(arrears),
-      "  → Past-Due P&I Payments": `Up to ${Math.min(dlqMonths, 6)} months`,
-      "  → Servicer Advances (third-party)": "Included if paid to third parties prior to effective date",
+      "Deferred Amount (Est.)": estTotalForbearance != null ? fmt$(estTotalForbearance) : fmt$(arrears),
+      "  → Est. P&I Payments Deferred": estPIForbearance != null ? `${fmt$(estPIForbearance)} (${fhlmcDeferMonths} months × ${fmt$(currentPI_val)})` : `Up to ${fhlmcDeferMonths} months`,
+      "  → Escrow Advances (servicer third-party)": escrowAdv > 0 ? fmt$(escrowAdv) : "$0.00 — enter escrow advance balance if applicable",
+      "  → Suspense / Unapplied Funds": suspense > 0 ? `${fmt$(suspense)} offset → net ${estNetForbearance != null ? fmt$(estNetForbearance) : "N/A"}` : "$0.00",
       "  → Escrow Shortage": escShortage > 0 ? `${fmt$(escShortage)} — NOT deferred; spread over escrow analysis` : "None",
       "Interest on Deferred Balance": "None — non-interest-bearing",
       "Deferred Balance Due": "At maturity, sale/transfer, refinance, or payoff",
@@ -982,10 +993,16 @@ function calcApprovalTerms(optionName, l) {
   }
   // ── FHLMC Disaster Payment Deferral ──
   if (opt === "FHLMC Disaster Payment Deferral") {
+    const currentPI_val = n(l.currentPI);
+    const fhlmcDisDeferMonths = Math.min(dlqMonths, 12);
+    const estPIForbearance = currentPI_val > 0 ? fhlmcDisDeferMonths * currentPI_val : null;
+    const estTotalForbearance = estPIForbearance != null ? estPIForbearance + escrowAdv : null;
+    const estNetForbearance = estTotalForbearance != null ? Math.max(0, estTotalForbearance - suspense) : null;
     return {
-      "Deferred Amount": fmt$(arrears),
-      "  → Past-Due P&I Payments": `Up to ${Math.min(dlqMonths, 12)} months (disaster: up to 12 months)`,
-      "  → Servicer Advances (third-party)": "Included",
+      "Deferred Amount (Est.)": estTotalForbearance != null ? fmt$(estTotalForbearance) : fmt$(arrears),
+      "  → Est. P&I Payments Deferred": estPIForbearance != null ? `${fmt$(estPIForbearance)} (${fhlmcDisDeferMonths} months × ${fmt$(currentPI_val)})` : `Up to ${fhlmcDisDeferMonths} months`,
+      "  → Escrow Advances (servicer third-party)": escrowAdv > 0 ? fmt$(escrowAdv) : "$0.00",
+      "  → Suspense / Unapplied Funds": suspense > 0 ? `${fmt$(suspense)} offset → net ${estNetForbearance != null ? fmt$(estNetForbearance) : "N/A"}` : "$0.00",
       "  → Escrow Shortage": escShortage > 0 ? `${fmt$(escShortage)} — NOT deferred` : "None",
       "Disaster Nexus Required": "Eligible Disaster — FEMA-declared or insured loss event",
       "Pre-Disaster Delinquency": "Borrower must have been current or <60 days DLQ at disaster date",
@@ -1016,7 +1033,9 @@ function calcApprovalTerms(optionName, l) {
   // ── Freddie Mac Flex Modification ──
   if (opt === "Freddie Mac Flex Modification" || opt === "Freddie Mac Flex Modification (Streamlined)" || opt === "Freddie Mac Flex Modification (Disaster)") {
     // Arrearages capitalizable (NOT escrow shortage — spread over 60 months)
-    const flexNewUPB = upb + arrears + legal;
+    const fhlmcPriorDeferred = n(l.fhlmcPriorDeferredUPB);
+    const fhlmcPreWorkoutUPB = upb + fhlmcPriorDeferred;
+    const flexNewUPB = fhlmcPreWorkoutUPB + arrears + legal;
     const currentPI_val = n(l.currentPI);
     const propValue = n(l.fhlmcPropertyValue);
     const fmModRate = n(l.fhlmcPostedModRate) || n(l.pmmsRate); // FM posted mod rate
@@ -1084,6 +1103,7 @@ function calcApprovalTerms(optionName, l) {
     return {
       "Modification Type": `Freddie Mac Flex Modification® — ${isStreamlined ? "Streamlined (No BRP)" : isDisaster ? "Disaster Eligibility" : "Standard (Full BRP)"}`,
       "Step Applied": stepApplied2 || "—",
+      "Pre-Workout UPB": fhlmcPriorDeferred > 0 ? `${fmt$(fhlmcPreWorkoutUPB)} (servicer UPB ${fmt$(upb)} + prior deferred ${fmt$(fhlmcPriorDeferred)})` : fmt$(upb),
       "Capitalized Amount": fmt$(arrears + legal),
       "  → Delinquent Accrued Interest / Arrearages": fmt$(arrears),
       "  → Foreclosure/Legal Costs": fmt$(legal),
@@ -1192,10 +1212,13 @@ function calcApprovalTerms(optionName, l) {
     const cumUsed = n(l.fnmaCumulativeDeferredMonths);
     const cumRemaining = Math.max(0, 12 - cumUsed);
     const effectiveDeferMonths = Math.min(deferMonths, cumRemaining);
-    // Estimated total forbearance = delinquent months × P&I (SMDU approach)
-    const estTotalForbearance = currentPI_val > 0 ? effectiveDeferMonths * currentPI_val : null;
-    // Post-workout UPB = UPB minus the principal component of deferred payments
-    // Approximate: deferred interest = UPB × (monthlyRate) × months; deferred principal = remainder
+    // Estimated total P&I forbearance = delinquent months × P&I (SMDU approach)
+    const estPIForbearance = currentPI_val > 0 ? effectiveDeferMonths * currentPI_val : null;
+    // Total forbearance = P&I payments + escrow advances
+    const estTotalForbearance = estPIForbearance != null ? estPIForbearance + escrowAdv : null;
+    // Net deferred amount after any suspense/unapplied funds offset
+    const estNetForbearance = estTotalForbearance != null ? Math.max(0, estTotalForbearance - suspense) : null;
+    // Post-workout UPB = UPB minus the principal component of deferred P&I payments
     const monthlyRate = currentRate > 0 ? currentRate / 100 / 12 : 0;
     let estDeferredPrincipal = 0;
     let runningUPB = upb;
@@ -1205,33 +1228,41 @@ function calcApprovalTerms(optionName, l) {
       estDeferredPrincipal += prinPortion;
       runningUPB -= prinPortion;
     }
+    const estDeferredInterest = estPIForbearance != null ? estPIForbearance - estDeferredPrincipal : null;
     const estPostWorkoutUPB = upb - estDeferredPrincipal;
     const cumulativeAfter = cumUsed + effectiveDeferMonths;
+    const hasPI = currentPI_val > 0 && currentRate > 0;
     return {
-      "Deferred Amount (Est.)": estTotalForbearance != null ? fmt$(estTotalForbearance) : fmt$(arrears),
-      "  → Est. Deferred Principal": currentPI_val > 0 && currentRate > 0 ? fmt$(estDeferredPrincipal) : "Enter current P&I and rate",
-      "  → Est. Deferred Interest": currentPI_val > 0 && currentRate > 0 && estTotalForbearance != null ? fmt$(estTotalForbearance - estDeferredPrincipal) : "Enter current P&I and rate",
-      "  → Months Deferred": `${effectiveDeferMonths} months (delinquency: ${deferMonths}mo; cap remaining: ${cumRemaining}mo)`,
-      "  → Out-of-Pocket Escrow Advances": "Included (third-party advances paid prior to effective date)",
+      "Deferred Amount — Est. Total Forbearance": estTotalForbearance != null ? fmt$(estTotalForbearance) : "Enter current P&I",
+      "  → Est. Deferred P&I": estPIForbearance != null ? `${fmt$(estPIForbearance)} (${effectiveDeferMonths} months × ${fmt$(currentPI_val)})` : "Enter current P&I",
+      "  → Est. Deferred Principal": hasPI ? fmt$(estDeferredPrincipal) : "Enter P&I and rate",
+      "  → Est. Deferred Interest": hasPI && estDeferredInterest != null ? fmt$(estDeferredInterest) : "Enter P&I and rate",
+      "  → Escrow Advances Deferred": escrowAdv > 0 ? fmt$(escrowAdv) : "$0.00 — enter escrow advance balance if applicable",
+      "  → Suspense / Unapplied Funds": suspense > 0 ? `${fmt$(suspense)} offset → net forbearance ${estNetForbearance != null ? fmt$(estNetForbearance) : "N/A"}` : "$0.00",
+      "  → Months Deferred": `${effectiveDeferMonths} months (DLQ: ${deferMonths}mo; cap remaining: ${cumRemaining}mo)`,
       "  → Escrow Shortage": escShortage > 0 ? `${fmt$(escShortage)} — repaid over 60-month escrow analysis (NOT deferred)` : "None",
-      "Post-Workout UPB (Est.)": currentPI_val > 0 && currentRate > 0 ? fmt$(estPostWorkoutUPB) : "Enter current P&I and rate",
+      "Post-Workout UPB (Est.)": hasPI ? fmt$(estPostWorkoutUPB) : "Enter P&I and rate",
       "P&I Payment After Deferral": currentPI_val > 0 ? `${fmt$(currentPI_val)} — UNCHANGED (no modification to rate, term, or payment)` : "Full contractual monthly payment — no change",
       "Cumulative Cap": `${cumUsed} months used → ${cumulativeAfter} after this deferral / 12-month lifetime cap (disaster deferrals excluded)`,
       "Interest on Deferred Balance": "None — non-interest-bearing balance",
       "Deferred Balance Due": "At maturity, sale/transfer, refinance, or payoff of interest-bearing UPB",
       "Late Charges": "All waived upon completion",
-      "Administrative Fees": "None",
       "Post-Deferral Default Risk": "If 60-day DLQ within 6 months → evaluate for Flex Modification by 75th DLQ day",
       "Authority": "Fannie Mae Servicing Guide D2-3.2-04 (08/13/2025)",
     };
   }
   // ── FNMA Disaster Payment Deferral ──
   if (opt === "FNMA Disaster Payment Deferral") {
+    const currentPI_val = n(l.currentPI);
     const deferMonths = Math.min(n(l.delinquencyMonths), 12);
+    const estPIForbearance = currentPI_val > 0 ? deferMonths * currentPI_val : null;
+    const estTotalForbearance = estPIForbearance != null ? estPIForbearance + escrowAdv : null;
+    const estNetForbearance = estTotalForbearance != null ? Math.max(0, estTotalForbearance - suspense) : null;
     return {
-      "Deferred Amount": fmt$(arrears),
-      "  → Past-Due P&I Payments": `Up to ${deferMonths} months (disaster maximum: 12 months)`,
-      "  → Out-of-Pocket Escrow Advances": "Included (third-party advances paid prior to effective date)",
+      "Deferred Amount (Est.)": estTotalForbearance != null ? fmt$(estTotalForbearance) : fmt$(arrears),
+      "  → Est. P&I Payments Deferred": estPIForbearance != null ? `${fmt$(estPIForbearance)} (${deferMonths} months × ${fmt$(currentPI_val)})` : `Up to ${deferMonths} months`,
+      "  → Escrow Advances Deferred": escrowAdv > 0 ? fmt$(escrowAdv) : "$0.00",
+      "  → Suspense / Unapplied Funds": suspense > 0 ? `${fmt$(suspense)} offset → net ${estNetForbearance != null ? fmt$(estNetForbearance) : "N/A"}` : "$0.00",
       "  → Escrow Shortage": escShortage > 0 ? `${fmt$(escShortage)} — repaid over 60-month escrow analysis (NOT deferred)` : "None",
       "vs. Standard Payment Deferral": "Disaster: up to 12mo deferred; 1–12mo DLQ eligible; no 12-month cumulative cap applied",
       "Same-Disaster Restriction": "Loan may NOT receive a second disaster deferral for the same disaster event",
@@ -1998,15 +2029,20 @@ function MainApp({profile,onSignOut}:{profile:Profile;onSignOut:()=>void}) {
                 </div>}
                 <F label="Target Payment Override (optional — leave blank to use 31% GMI)"><Num value={loan.targetPayment} onChange={v=>set("targetPayment",v)} placeholder="Auto: 31% GMI" prefix="$"/></F>
               </Sec>
-              <Sec title="📐 Amounts to Capitalize">
-                <F label="Arrearages (total DLQ P&I + escrow advances)"><Num value={loan.arrearagesToCapitalize} onChange={v=>set("arrearagesToCapitalize",v)} placeholder="e.g. 7200" prefix="$"/></F>
-                <F label="Projected Escrow Shortage"><Num value={loan.escrowShortage} onChange={v=>set("escrowShortage",v)} placeholder="e.g. 800" prefix="$"/></F>
+              <Sec title="📐 Amounts to Capitalize / Defer">
+                <F label="Arrearages (past-due P&I + escrow advances — total for capitalization)"><Num value={loan.arrearagesToCapitalize} onChange={v=>set("arrearagesToCapitalize",v)} placeholder="e.g. 7200" prefix="$"/></F>
+                <F label="Escrow Advance Balance (servicer-paid taxes/insurance — included in Payment Deferral)"><Num value={loan.escrowAdvanceBalance} onChange={v=>set("escrowAdvanceBalance",v)} placeholder="e.g. 0" prefix="$"/></F>
+                <F label="Accrued Delinquent Interest (for SMDU reconciliation)"><Num value={loan.accruedDelinquentInterest} onChange={v=>set("accruedDelinquentInterest",v)} placeholder="e.g. 0" prefix="$"/></F>
+                <F label="Suspense / Unapplied Funds (offsets deferred amount)"><Num value={loan.suspenseBalance} onChange={v=>set("suspenseBalance",v)} placeholder="e.g. 0" prefix="$"/></F>
+                <F label="Projected Escrow Shortage (NOT capitalized — spread over 60 months)"><Num value={loan.escrowShortage} onChange={v=>set("escrowShortage",v)} placeholder="e.g. 800" prefix="$"/></F>
                 <F label="Legal / Foreclosure Fees (actually performed)"><Num value={loan.legalFees} onChange={v=>set("legalFees",v)} placeholder="e.g. 1200" prefix="$"/></F>
-                <F label="Late Fees (EXCLUDED — for reference only)"><Num value={loan.lateFees} onChange={v=>set("lateFees",v)} placeholder="e.g. 300" prefix="$"/></F>
+                <F label="Late Fees (NOT capitalizable — for reference only)"><Num value={loan.lateFees} onChange={v=>set("lateFees",v)} placeholder="e.g. 300" prefix="$"/></F>
                 <F label="Prior Partial Claim / MRA Balance"><Num value={loan.priorPartialClaimBalance} onChange={v=>set("priorPartialClaimBalance",v)} placeholder="e.g. 15000" prefix="$"/></F>
                 {loan.loanType!=="USDA"&&<F label="Partial Claim % of Statutory Limit"><Num value={loan.partialClaimPct} onChange={v=>set("partialClaimPct",v)} placeholder="e.g. 20"/></F>}
-                {n(loan.arrearagesToCapitalize)>0&&n(loan.escrowShortage)>=0&&<div className="bg-green-50 rounded p-2 text-xs text-green-800 mt-1">
-                  <div>Total Capitalizable: <strong>{fmt$(n(loan.arrearagesToCapitalize)+n(loan.escrowShortage)+n(loan.legalFees))}</strong></div>
+                {n(loan.arrearagesToCapitalize)>0&&<div className="bg-green-50 rounded p-2 text-xs text-green-800 mt-1 space-y-0.5">
+                  <div>Total Capitalizable (arrears + legal): <strong>{fmt$(n(loan.arrearagesToCapitalize)+n(loan.legalFees))}</strong></div>
+                  {n(loan.escrowAdvanceBalance)>0&&<div>Est. Payment Deferral Total: <strong>{fmt$(n(loan.arrearagesToCapitalize)+n(loan.escrowAdvanceBalance)-n(loan.suspenseBalance))}</strong></div>}
+                  {n(loan.suspenseBalance)>0&&<div className="text-blue-700">Suspense offset: <strong>−{fmt$(n(loan.suspenseBalance))}</strong></div>}
                   <div className="text-red-600">Late fees excluded: <strong>{fmt$(n(loan.lateFees))}</strong></div>
                   {n(loan.originalUpb)>0&&<div>30% PC Cap: <strong>{fmt$(n(loan.originalUpb)*0.30)}</strong></div>}
                   {n(loan.originalUpb)>0&&<div>25% Arrearage Cap (VA): <strong>{fmt$(n(loan.originalUpb)*0.25)}</strong></div>}
@@ -2223,6 +2259,7 @@ function MainApp({profile,onSignOut}:{profile:Profile;onSignOut:()=>void}) {
                   <Tog label="2+ 30-day DLQ in most recent 6-month period" value={loan.fhlmcPrior30DayDLQ6Mo} onChange={v=>set("fhlmcPrior30DayDLQ6Mo",v)}/>
                 </Sec>
                 <Sec title="FHLMC – Prior Workout History">
+                  <F label="Prior deferred balance (non-interest-bearing forbearance from prior deferrals — added to UPB for Flex Mod)"><Num value={loan.fhlmcPriorDeferredUPB} onChange={v=>set("fhlmcPriorDeferredUPB",v)} placeholder="0" prefix="$"/></F>
                   <F label="Prior modifications (count)"><Num value={loan.fhlmcPriorModCount} onChange={v=>set("fhlmcPriorModCount",v)} placeholder="0"/></F>
                   <Tog label="Failed Flex Mod TPP within 12 months" value={loan.fhlmcFailedFlexTPP12Mo} onChange={v=>set("fhlmcFailedFlexTPP12Mo",v)}/>
                   <Tog label="Prior Flex Mod → 60+ DLQ within 12mo, not cured" value={loan.fhlmcPriorFlexMod60DLQ} onChange={v=>set("fhlmcPriorFlexMod60DLQ",v)}/>
