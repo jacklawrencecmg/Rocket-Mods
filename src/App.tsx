@@ -1983,7 +1983,7 @@ function MainApp({profile,onSignOut}:{profile:Profile;onSignOut:()=>void}) {
           <div className="flex items-center gap-3">
             <div className="w-9 h-9 rounded-xl bg-blue-500 flex items-center justify-center text-lg shadow-lg shadow-blue-900/50">🚀</div>
             <div>
-              <h1 className="text-lg font-black tracking-tight">Rocket Mods</h1>
+              <h1 className="text-lg font-black tracking-tight">ResolutionIQ</h1>
               <p className="text-blue-300 text-xs font-medium">FHA · USDA · VA · FNMA · FHLMC Loss Mitigation Rules Engine</p>
             </div>
           </div>
@@ -2621,7 +2621,7 @@ export default function App() {
   const logo=(
     <div className="text-center mb-8">
       <div className="inline-flex items-center justify-center w-16 h-16 rounded-2xl bg-gradient-to-br from-emerald-500 to-teal-600 mb-4 shadow-lg"><span className="text-2xl">🚀</span></div>
-      <h1 className="text-2xl font-black text-white tracking-tight">Rocket Mods</h1>
+      <h1 className="text-2xl font-black text-white tracking-tight">ResolutionIQ</h1>
       <p className="text-slate-400 text-sm mt-1">Loss Mitigation Rules Engine</p>
     </div>
   );
