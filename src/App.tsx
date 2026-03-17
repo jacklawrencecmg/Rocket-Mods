@@ -91,6 +91,15 @@ const initLoan = {
   fnmaInsuredLoss:false,
   fnmaDelinquencyAtDisaster:"0",
   fnmaSameDlisasterPriorDeferral:false,
+  fnmaMortgageType:"Fixed Rate",   // "Fixed Rate" or "ARM"
+  fnmaCurrentIndex:"",             // current index rate % (ARM only, e.g. SOFR)
+  fnmaMargin:"",                   // margin % (ARM only)
+  fnmaQRPCAchieved:false,          // Qualified Right Party Contact achieved
+  fnmaFICO:"",                     // FICO score for imminent default Rule 2
+  fnmaHousingRatio:"",             // pre-mod housing expense / GMI % for ID Rule 2
+  fnmaCashReservesLt3Mo:false,     // cash reserves < 3 months PITIA (ID Rule 1)
+  fnmaLongTermHardship:false,      // long-term/permanent hardship (ID Rule 1)
+  fnmaPrior30DLQ12Mo:false,        // 2+ 30-day DLQ in past 12 months (ID Rule 2)
   // FHLMC
   fhlmcHardshipResolved:false,
   fhlmcCanResumeFull:false,
@@ -98,6 +107,9 @@ const initLoan = {
   fhlmcPriorDeferredUPB:"0",
   fhlmcLoanAge:"24",
   fhlmcMortgageType:"Conventional", // Conventional, FHA, VA, RHS
+  fhlmcRateType:"Fixed Rate",       // "Fixed Rate" or "ARM"
+  fhlmcCurrentIndex:"",             // current index rate % (ARM only, e.g. SOFR)
+  fhlmcMarginRate:"",               // margin % (ARM only)
   fhlmcPropertyType:"Primary Residence", // Primary Residence, Second Home, Investment Property
   fhlmcLongTermHardship:true, // long-term/permanent hardship (NOT unemployment → forbearance)
   fhlmcUnemployed:false,
@@ -218,7 +230,7 @@ function calcApprovalTerms(optionName, l) {
   const newFirstPmt = calcNewFirstPayment(effDate);
 
   // Maturity helpers
-  const mat360FromMod = addMonths(effDate, 360);
+  const mat360FromMod = addMonths(newFirstPmt, 360);
   const mat480FromOrig = noteFirstPmt ? addMonths(noteFirstPmt, 480) : null;
   const mat120PastOrig = origMaturity ? addMonths(origMaturity, 120) : null;
 
@@ -330,26 +342,44 @@ function calcApprovalTerms(optionName, l) {
 
   // ── FHA-HAMP Combo Mod + PC ──
   if (opt === "FHA-HAMP Combo Loan Modification & Partial Claim") {
-    const newMat = mat360FromMod;
-    // Mod covers arrears + escrow shortage; PC covers legal fees + any principal deferment
-    const modCapAmount = arrears + escShortage;
-    const newModUPB = upb + modCapAmount;
-    const newPI = pmms > 0 && newModUPB > 0 ? calcMonthlyPI(newModUPB, pmms, 360) : null;
+    // Per HUD 4000.1 III.A.2.k.ii.C:
+    // Step 1: Capitalize ALL permissible costs into new UPB (same as standalone mod)
+    const fullNewUPB = upb + capAmount; // arrears + escrow shortage + legal fees
+    // Step 2: Calculate PC as principal deferral needed to bring PITI to 31% target
+    const monthlyRate = pmms > 0 ? pmms / 100 / 12 : 0;
+    const targetPI = target > 0 && currentEscrow >= 0 ? target - currentEscrow : null;
+    const targetUPB = targetPI != null && targetPI > 0 && monthlyRate > 0
+      ? targetPI * ((1 - Math.pow(1 + monthlyRate, -360)) / monthlyRate)
+      : null;
+    const pcDeferral = targetUPB != null ? Math.max(0, fullNewUPB - targetUPB) : 0;
+    const pcTotal = remainingPCAvailable != null ? Math.min(pcDeferral, remainingPCAvailable) : pcDeferral;
+    const pcPctOfOrigUpb = originalUpb > 0 ? (( priorPC + pcTotal) / originalUpb * 100).toFixed(1) : null;
+    const pcWithinCap = maxPCAmount != null ? (priorPC + pcTotal) <= maxPCAmount : null;
+    // Step 3: Final modified UPB = full new UPB minus PC deferral
+    const finalModUPB = fullNewUPB - pcTotal;
+    const newPI = pmms > 0 && finalModUPB > 0 ? calcMonthlyPI(finalModUPB, pmms, 360) : null;
     const newPITI = newPI != null ? newPI + currentEscrow : null;
-    const pcAmountBase = legal; // legal/foreclosure in PC
-    const pcTotal = Math.min(pcAmountBase, remainingPCAvailable || pcAmountBase);
     const targetMet = target > 0 && newPITI != null ? newPITI <= target : null;
     const pctOfGMI = gmi > 0 && newPITI != null ? (newPITI/gmi*100).toFixed(1) : null;
     return {
-      "Modified Loan Amount (New UPB — Modification)": fmt$(newModUPB),
-      "  → Arrearages Capitalized in Mod": fmt$(arrears),
-      "  → Escrow Shortage Capitalized in Mod": fmt$(escShortage),
-      "Partial Claim Amount": fmt$(pcTotal),
-      "  → Legal / Foreclosure Fees in PC": fmt$(legal),
-      "  → Late Fees (EXCLUDED from both)": lateFees > 0 ? `${fmt$(lateFees)} — NOT included` : "None",
+      "── Step 1: Capitalize All Permissible Costs ──": "——",
+      "Full New UPB (pre-deferral)": fmt$(fullNewUPB),
+      "  → Arrearages": fmt$(arrears),
+      "  → Escrow Shortage": fmt$(escShortage),
+      "  → Legal / Foreclosure Fees": fmt$(legal),
+      "  → Late Fees (EXCLUDED)": lateFees > 0 ? `${fmt$(lateFees)} — NOT capitalized` : "None",
+      "── Step 2: Partial Claim (Principal Deferral) ──": "——",
+      "Target Monthly P&I (31% GMI minus Escrow)": targetPI != null && targetPI > 0 ? fmt$(targetPI) : "Enter GMI & Escrow",
+      "Target UPB to Achieve Affordability": targetUPB != null ? fmt$(targetUPB) : "Enter PMMS rate & GMI",
+      "Principal Deferral Required": pcDeferral > 0 ? fmt$(pcDeferral) : "$0.00 — UPB already at or below target",
       "Prior Partial Claim Balance": fmt$(priorPC),
-      "30% Statutory Cap": maxPCAmount != null ? fmt$(maxPCAmount) : "Enter Original UPB",
-      "Remaining PC Available": remainingPCAvailable != null ? fmt$(remainingPCAvailable) : "Enter Original UPB",
+      "30% Statutory Cap (30% of Orig. UPB)": maxPCAmount != null ? fmt$(maxPCAmount) : "Enter Original UPB",
+      "Remaining PC Capacity": remainingPCAvailable != null ? fmt$(remainingPCAvailable) : "Enter Original UPB",
+      "Partial Claim Amount": fmt$(pcTotal),
+      "Total PC as % of Original UPB": pcPctOfOrigUpb ? pcPctOfOrigUpb+"%" : "Enter Original UPB",
+      "PC Within 30% Cap?": pcWithinCap == null ? "Enter Original UPB" : pcWithinCap ? `✅ Yes — ${pcPctOfOrigUpb}% ≤ 30%` : `❌ No — ${pcPctOfOrigUpb}% exceeds 30% cap`,
+      "── Step 3: Final Modified Loan Terms ──": "——",
+      "Final Modified Loan Amount (New UPB)": fmt$(finalModUPB),
       "New Interest Rate": pmms > 0 ? fmtPct(pmms)+" (PMMS)" : "Enter PMMS rate",
       "New Loan Term": "360 months (30 years)",
       "New Monthly P&I": fmt$(newPI),
@@ -357,13 +387,11 @@ function calcApprovalTerms(optionName, l) {
       "New Monthly PITI": fmt$(newPITI),
       "New PITI as % of GMI": pctOfGMI ? pctOfGMI+"%" : "Enter GMI",
       "Target Payment (31% GMI)": gmi > 0 ? fmt$(gmi*0.31) : "Enter GMI",
-      "40% GMI Cap": gmi > 0 ? fmt$(gmi*0.40) : "Enter GMI",
-      "Target Payment Met?": targetMet == null ? "Enter inputs" : targetMet ? "✅ Yes" : "❌ No — new PITI above target",
-      "Modified Payment NOT Below Target?": targetMet == null ? "Enter inputs" : !targetMet ? "✅ Confirmed (PC cannot push below target)" : "N/A",
-      "New Maturity Date": fmtDate(newMat),
+      "Target Payment Met?": targetMet == null ? "Enter inputs" : targetMet ? "✅ Yes" : "❌ No — PC cap insufficient to reach target",
+      "New Maturity Date": fmtDate(mat360FromMod),
       "New First Payment Date": fmtDate(newFirstPmt),
       "PC Lien Type": "Non-interest bearing subordinate lien",
-      "PC Payoff Trigger": "Due upon sale, refinance, or payoff",
+      "PC Payoff Trigger": "Due upon sale, refinance, or payoff of first mortgage",
       "Trial Payment Plan": "3-month TPP at new PITI amount",
       "Approval Notification": "2-day mail with enclosed 2-day return envelope",
     };
@@ -504,11 +532,17 @@ function calcApprovalTerms(optionName, l) {
 
   // ── USDA Streamline Loan Modification ──
   if (opt === "USDA Streamline Loan Modification") {
-    const newMat360 = mat360FromMod;
+    // Per HB-1-3555 §18.7: rate = lesser of PMMS or current note rate
+    const newRate = pmms > 0 && currentRate > 0 ? Math.min(pmms, currentRate) : pmms;
+    const rateLabel = newRate > 0
+      ? fmtPct(newRate) + (currentRate > 0 && currentRate < pmms ? " (Current Note Rate — below PMMS)" : " (PMMS)")
+      : "Enter PMMS rate";
     const newMat480 = newFirstPmt ? addMonths(newFirstPmt, 480) : null;
-    const maturityDate = newMat480 || newMat360;
-    const newPI_existing = pmms > 0 && newUPB > 0 && remainingTerm ? calcMonthlyPI(newUPB, pmms, remainingTerm) : null;
-    const newPI_extended = pmms > 0 && newUPB > 0 ? calcMonthlyPI(newUPB, pmms, 480) : null;
+    // Step 1: re-amortize at new rate over remaining term
+    const matStep1 = newFirstPmt && remainingTerm ? addMonths(newFirstPmt, remainingTerm) : null;
+    const newPI_existing = newRate > 0 && newUPB > 0 && remainingTerm ? calcMonthlyPI(newUPB, newRate, remainingTerm) : null;
+    // Step 2: extend to 480 months
+    const newPI_extended = newRate > 0 && newUPB > 0 ? calcMonthlyPI(newUPB, newRate, 480) : null;
     const newPITI_existing = newPI_existing != null ? newPI_existing + currentEscrow : null;
     const newPITI_extended = newPI_extended != null ? newPI_extended + currentEscrow : null;
     const targetMet_existing = target > 0 && newPITI_existing != null ? newPITI_existing <= target : null;
@@ -516,17 +550,17 @@ function calcApprovalTerms(optionName, l) {
     const pctGMI = gmi > 0 && newPITI_extended != null ? (newPITI_extended/gmi*100).toFixed(1) : null;
     // Step 3: principal deferral — defer enough UPB so 480-month P&I hits target
     let step3 = {};
-    if (target > 0 && newPITI_extended != null && !targetMet_extended && pmms > 0) {
+    if (target > 0 && newPITI_extended != null && !targetMet_extended && newRate > 0) {
       const targetPI = Math.max(0, target - currentEscrow);
-      const r = pmms / 100 / 12;
+      const r = newRate / 100 / 12;
       const affordableUPB = r > 0 ? targetPI * (Math.pow(1+r,480) - 1) / (r * Math.pow(1+r,480)) : targetPI * 480;
       const deferralAmt = Math.max(0, newUPB - affordableUPB);
-      const step3PI = calcMonthlyPI(affordableUPB, pmms, 480);
+      const step3PI = calcMonthlyPI(affordableUPB, newRate, 480);
       const step3PITI = step3PI != null ? step3PI + currentEscrow : null;
       step3 = {
         "Step 3 — Principal Deferral Required": fmt$(deferralAmt),
         "Step 3 — Modified UPB (after deferral)": fmt$(affordableUPB),
-        "Step 3 — New P&I (480mo on deferred balance)": fmt$(step3PI),
+        "Step 3 — New P&I (480mo on reduced balance)": fmt$(step3PI),
         "Step 3 — New PITI": fmt$(step3PITI),
         "Step 3 — Target Met?": step3PITI != null ? (step3PITI <= target ? "✅ Yes" : "❌ Cannot achieve target — loan ineligible") : "Enter inputs",
         "Step 3 — Deferral Lien": "Non-interest bearing subordinate note; due on sale, refinance, or payoff",
@@ -539,17 +573,23 @@ function calcApprovalTerms(optionName, l) {
       "  → Escrow Shortage": fmt$(escShortage),
       "  → Legal / Foreclosure Fees": fmt$(legal),
       "  → Late Fees (EXCLUDED)": lateFees > 0 ? `${fmt$(lateFees)} — NOT capitalized` : "None",
-      "New Interest Rate": pmms > 0 ? fmtPct(pmms)+" (PMMS)" : "Enter PMMS rate",
-      "Step 1 — Existing Term Payment": newPI_existing != null ? fmt$(newPI_existing)+" P&I / "+fmt$(newPITI_existing)+" PITI" : "Enter inputs",
+      "New Interest Rate": rateLabel,
+      "  → PMMS Rate": pmms > 0 ? fmtPct(pmms) : "Enter PMMS rate",
+      "  → Current Note Rate": currentRate > 0 ? fmtPct(currentRate) : "Enter current rate",
+      "  → Rate Applied (lesser)": newRate > 0 ? fmtPct(newRate) : "Enter rates",
+      "Step 1 — Existing Term Re-amortization": "——",
       "Step 1 — Remaining Term": remainingTerm ? `${remainingTerm} months` : "Enter Note dates",
-      "Step 1 — Target Met?": targetMet_existing == null ? "Enter inputs" : targetMet_existing ? "✅ Yes — use existing term" : "❌ No — extend term",
-      "Step 2 — Extended to 480 Months Payment": newPI_extended != null ? fmt$(newPI_extended)+" P&I / "+fmt$(newPITI_extended)+" PITI" : "Enter inputs",
+      "Step 1 — New P&I / PITI": newPI_existing != null ? fmt$(newPI_existing)+" P&I / "+fmt$(newPITI_existing)+" PITI" : "Enter inputs",
+      "Step 1 — Target Met?": targetMet_existing == null ? "Enter inputs" : targetMet_existing ? "✅ Yes — use existing term" : "❌ No — proceed to Step 2",
+      "Step 1 — Maturity Date": matStep1 ? fmtDate(matStep1) : "Enter Note dates",
+      "Step 2 — Extend to 480 Months": "——",
+      "Step 2 — New P&I / PITI (480mo)": newPI_extended != null ? fmt$(newPI_extended)+" P&I / "+fmt$(newPITI_extended)+" PITI" : "Enter inputs",
       "Step 2 — Target Met (480mo)?": target > 0 && newPITI_extended != null ? (targetMet_extended ? "✅ Yes" : "❌ No — proceed to Step 3 (principal deferral)") : "Enter inputs",
+      "Step 2 — Maturity Date": fmtDate(newMat480),
       ...step3,
       "Maximum Term": "480 months from First Installment Date of Modification",
-      "New Maturity Date": targetMet_existing ? fmtDate(newMat360)+" (Step 1 — existing term)" : fmtDate(newMat480)+" (Step 2/3 — extended to 480mo)",
+      "Final Maturity Date": targetMet_existing ? fmtDate(matStep1)+" (Step 1)" : fmtDate(newMat480)+" (Step 2/3)",
       "New First Payment Date": fmtDate(newFirstPmt),
-      "New Monthly PITI (480-month scenario)": fmt$(newPITI_extended),
       "PITI as % of GMI": pctGMI ? pctGMI+"% (target ≤ 31%)" : "Enter GMI",
       "Target Payment (31% GMI)": gmi > 0 ? fmt$(gmi*0.31) : "Enter GMI",
       "Trial Payment Plan": "3 months (4 months if imminent default)",
@@ -582,9 +622,17 @@ function calcApprovalTerms(optionName, l) {
 
   // ── USDA Disaster Modification ──
   if (opt === "USDA Disaster Modification") {
-    const newMat = mat360FromMod;
-    const newPI = pmms > 0 && newUPB > 0 ? calcMonthlyPI(newUPB, pmms, 360) : null;
-    const newPITI = newPI != null ? newPI + currentEscrow : null;
+    // Per HB-1-3555: rate = lesser of PMMS or current note rate
+    const newRate = pmms > 0 && currentRate > 0 ? Math.min(pmms, currentRate) : pmms;
+    const rateLabel = newRate > 0
+      ? fmtPct(newRate) + (currentRate > 0 && currentRate < pmms ? " (Current Note Rate — below PMMS)" : " (PMMS)")
+      : "Enter PMMS rate";
+    const newMat480 = newFirstPmt ? addMonths(newFirstPmt, 480) : null;
+    const newPI_360 = newRate > 0 && newUPB > 0 ? calcMonthlyPI(newUPB, newRate, 360) : null;
+    const newPI_480 = newRate > 0 && newUPB > 0 ? calcMonthlyPI(newUPB, newRate, 480) : null;
+    const newPITI_360 = newPI_360 != null ? newPI_360 + currentEscrow : null;
+    const newPITI_480 = newPI_480 != null ? newPI_480 + currentEscrow : null;
+    const targetMet_360 = target > 0 && newPITI_360 != null ? newPITI_360 <= target : null;
     return {
       "Modified Loan Amount (New UPB)": fmt$(newUPB),
       "Capitalized Amount": fmt$(capAmount),
@@ -592,12 +640,11 @@ function calcApprovalTerms(optionName, l) {
       "  → Escrow Shortage": fmt$(escShortage),
       "  → Legal / Foreclosure Fees": fmt$(legal),
       "  → Late Fees (EXCLUDED)": lateFees > 0 ? `${fmt$(lateFees)} — NOT capitalized` : "None",
-      "New Interest Rate": pmms > 0 ? fmtPct(pmms)+" (PMMS)" : "Enter PMMS rate",
-      "New Loan Term": "360 months (30 years)",
-      "New Monthly P&I": fmt$(newPI),
-      "New Monthly Escrow": fmt$(currentEscrow || null),
-      "New Monthly PITI": fmt$(newPITI),
-      "New Maturity Date": fmtDate(newMat),
+      "New Interest Rate": rateLabel,
+      "New Loan Term — 360mo P&I / PITI": newPI_360 != null ? fmt$(newPI_360)+" / "+fmt$(newPITI_360) : "Enter inputs",
+      "360mo Target Met?": targetMet_360 == null ? "Enter inputs" : targetMet_360 ? "✅ Yes — use 360mo term" : "❌ No — extend to 480mo",
+      "New Loan Term — 480mo P&I / PITI": newPI_480 != null ? fmt$(newPI_480)+" / "+fmt$(newPITI_480) : "Enter inputs",
+      "New Maturity Date": targetMet_360 ? fmtDate(mat360FromMod)+" (360mo)" : fmtDate(newMat480)+" (480mo)",
       "New First Payment Date": fmtDate(newFirstPmt),
       "Trial Payment Plan": "3-month TPP required",
     };
@@ -653,13 +700,13 @@ function calcApprovalTerms(optionName, l) {
   if (opt === "USDA Informal Repayment Plan") {
     const currentPITI = n(l.currentPITI);
     const totalArrears = arrears || (currentPITI * dlqMonths);
-    const rppMonths = Math.min(3, Math.max(1, n(l.repayMonths) || 3));
+    const rppMonths = Math.min(12, Math.max(1, n(l.repayMonths) || 6));
     const catchUp = totalArrears > 0 ? totalArrears / rppMonths : null;
     const total = catchUp != null ? currentPITI + catchUp : null;
     return {
       "Current Monthly PITI": fmt$(currentPITI || null),
       "Total Arrearages": fmt$(totalArrears || null),
-      "Plan Length": `${rppMonths} months (max 3 per USDA HB-1-3555)`,
+      "Plan Length": `${rppMonths} months (max 12 per HB-1-3555 §18.4)`,
       "Monthly Catch-Up Amount": fmt$(catchUp || null),
       "Total Monthly RPP Payment": fmt$(total || null),
       "200% Cap": fmt$(currentPITI * 2 || null),
@@ -672,7 +719,7 @@ function calcApprovalTerms(optionName, l) {
   if (opt === "USDA Special Forbearance" || opt === "USDA Disaster Forbearance") {
     const currentPITI = n(l.currentPITI);
     return {
-      "Forbearance Duration": opt === "USDA Disaster Forbearance" ? "3-month increments, reviewed monthly" : "Per servicer determination",
+      "Forbearance Duration": opt === "USDA Disaster Forbearance" ? "3-month increments, reviewed monthly" : "Up to 12 months total (HB-1-3555 §18.5); extended in 3-month increments",
       "Monthly Payment During Plan": "Reduced or suspended",
       "Late Fees": "Not assessed during plan",
       "First Post-Forbearance Payment": fmtDate(addMonths(effDate, 4)),
@@ -707,8 +754,10 @@ function calcApprovalTerms(optionName, l) {
     return {
       "Modified Loan Amount (New UPB)": fmt$(newUPB),
       "Capitalized Amount": fmt$(capAmount),
-      "  → All Arrearages": fmt$(arrears),
+      "  → Arrearages": fmt$(arrears),
       "  → Escrow Shortage": fmt$(escShortage),
+      "  → Legal / Foreclosure Fees": fmt$(legal),
+      "  → Late Fees (EXCLUDED)": lateFees > 0 ? `${fmt$(lateFees)} — NOT capitalized` : "None",
       "New Interest Rate": pmms > 0 ? fmtPct(pmms)+" (PMMS)" : "Enter PMMS rate",
       "New Loan Term": "360 months (30 years)",
       "New Monthly P&I": fmt$(newPI),
@@ -775,7 +824,9 @@ function calcApprovalTerms(optionName, l) {
     const is40yr = opt === "VA 40-Year Loan Modification";
     const isTraditional = opt === "VA Traditional Modification";
     const termMonths = is40yr ? 480 : 360;
-    const rateToUse = isTraditional ? currentRate : pmms;
+    // Per Circular 26-21-12: PMMS rounded UP to nearest 0.125% for all VA modifications
+    const roundedPMMS = pmms > 0 ? Math.ceil(pmms * 8) / 8 : pmms;
+    const rateToUse = isTraditional ? currentRate : roundedPMMS;
 
     // Maturity logic:
     // 30-year / Traditional: lesser of (360mo from mod first installment) OR (120mo past original maturity)
@@ -831,8 +882,9 @@ function calcApprovalTerms(optionName, l) {
       "  → Legal Fees": fmt$(legal),
       "  → Late Fees (EXCLUDED)": lateFees > 0 ? `${fmt$(lateFees)} — NOT capitalized` : "None",
       "New Interest Rate": rateToUse > 0
-        ? fmtPct(rateToUse) + (isTraditional ? " (negotiated — VA approval required)" : " (PMMS — required per VA Circular 26-21-12)")
+        ? fmtPct(rateToUse) + (isTraditional ? " (negotiated — VA approval required)" : " (PMMS rounded up to nearest 0.125% — Circular 26-21-12)")
         : (isTraditional ? "Enter negotiated rate" : "Enter PMMS rate"),
+      ...(!isTraditional && pmms > 0 ? {"  → PMMS (raw)": fmtPct(pmms), "  → PMMS (rounded up ⅛%)": fmtPct(roundedPMMS)} : {}),
       "New Loan Term": termMonths+" months ("+(termMonths/12)+" years)",
       "New Monthly P&I": fmt$(newPI),
       "New Monthly Escrow": fmt$(currentEscrow || null),
@@ -983,13 +1035,14 @@ function calcApprovalTerms(optionName, l) {
       "  → Escrow Advances (servicer third-party)": escrowAdv > 0 ? fmt$(escrowAdv) : "$0.00 — enter escrow advance balance if applicable",
       "  → Suspense / Unapplied Funds": suspense > 0 ? `${fmt$(suspense)} offset → net ${estNetForbearance != null ? fmt$(estNetForbearance) : "N/A"}` : "$0.00",
       "  → Escrow Shortage": escShortage > 0 ? `${fmt$(escShortage)} — NOT deferred; spread over escrow analysis` : "None",
+      "Cumulative Cap (Non-Disaster)": "Lifetime cap of 12 months deferred (non-disaster); prior non-disaster deferral must be ≥ 12 months ago",
       "Interest on Deferred Balance": "None — non-interest-bearing",
       "Deferred Balance Due": "At maturity, sale/transfer, refinance, or payoff",
       "First Payment After Deferral": "Full contractual monthly payment",
       "Late Charges": "Waived upon completion",
       "Administrative Fees": "None",
       "Servicer Compensation": "$500 incentive (subject to $1,000 combined cap per mortgage)",
-      "Authority": "Freddie Mac Single-Family Guide §9203 (02/11/26)",
+      "Authority": "Freddie Mac Single-Family Guide §9203.4 (02/11/26)",
     };
   }
   // ── FHLMC Disaster Payment Deferral ──
@@ -1042,21 +1095,29 @@ function calcApprovalTerms(optionName, l) {
     const fmModRate = n(l.fhlmcPostedModRate) || n(l.pmmsRate); // FM posted mod rate
     // MTMLTV with post-capitalized UPB
     const mtmltv = propValue > 0 && flexNewUPB > 0 ? (flexNewUPB / propValue * 100) : null;
-    // Step 2: Preliminary rate
-    const prelimRate = currentRate; // For fixed-rate mortgages (simplified)
-    // Step 3: Interest rate relief (only if MTMLTV ≥ 50%)
-    const canReduceRate = mtmltv == null || mtmltv >= 50;
+    // Step 2: Preliminary Rate (§9206.6)
+    // Fixed-rate: preliminary rate = current note rate (no change)
+    // ARM: preliminary rate = lower of current note rate OR fully-indexed rate (index + margin, nearest 0.125%)
+    const fhlmcIsARM = (l.fhlmcRateType || "Fixed Rate") === "ARM";
+    const fhlmcIndex = n(l.fhlmcCurrentIndex);
+    const fhlmcMarginVal = n(l.fhlmcMarginRate);
+    const fhlmcFullyIndexed = fhlmcIsARM && fhlmcIndex > 0 && fhlmcMarginVal > 0 ? Math.round((fhlmcIndex + fhlmcMarginVal) * 8) / 8 : null;
+    const fhlmcPrelimRate = fhlmcIsARM && fhlmcFullyIndexed != null ? Math.min(currentRate, fhlmcFullyIndexed) : currentRate;
+    // Escrow shortage 60-month spread (§9206.6: not capitalizable, spread over analysis period)
+    const fhlmcEscShortageSpread = escShortage > 0 ? escShortage / 60 : 0;
+    // Step 3: Interest rate relief — per §9206.6, only if MTMLTV ≥ 80%
+    const canReduceRate = mtmltv == null || mtmltv >= 80;
     const rateFloor = fmModRate > 0 ? fmModRate : null;
-    // Step 4: Term extension to 480 months
-    // Step 5: Principal forbearance (only if MTMLTV > 50%, up to 30% of post-cap UPB)
-    const canForbearPrincipal = mtmltv == null || mtmltv > 50;
+    // Step 4: Term extension to 480 months from modification effective date
+    // Step 5: Principal forbearance — per §9206.6, only if MTMLTV > 80%, up to 30% of post-cap UPB
+    const canForbearPrincipal = mtmltv == null || mtmltv > 80;
     const maxForbearance = flexNewUPB * 0.30;
     // Target: P&I reduction EXCEEDING 20%
     const target20Plus = currentPI_val > 0 ? currentPI_val * 0.799 : null; // just under 80% = just over 20% reduction
-    // Step 1 → re-amortize at current rate for remaining term
-    const step1PI = remainingTerm && currentRate > 0 && flexNewUPB > 0 ? calcMonthlyPI(flexNewUPB, currentRate, remainingTerm) : null;
-    // Step 3 → rate reduced to floor, remaining term
-    const step3PI = remainingTerm && rateFloor && rateFloor < currentRate && flexNewUPB > 0 ? calcMonthlyPI(flexNewUPB, rateFloor, remainingTerm) : null;
+    // Step 1 → re-amortize at preliminary rate for remaining term
+    const step1PI = remainingTerm && fhlmcPrelimRate > 0 && flexNewUPB > 0 ? calcMonthlyPI(flexNewUPB, fhlmcPrelimRate, remainingTerm) : null;
+    // Step 3 → rate reduced to floor, remaining term (compare against preliminary rate, not note rate)
+    const step3PI = remainingTerm && rateFloor && rateFloor < fhlmcPrelimRate && flexNewUPB > 0 ? calcMonthlyPI(flexNewUPB, rateFloor, remainingTerm) : null;
     // Step 4 → floor rate at 480 months
     const step4PI = rateFloor && flexNewUPB > 0 ? calcMonthlyPI(flexNewUPB, rateFloor, 480) : (currentRate > 0 && flexNewUPB > 0 ? calcMonthlyPI(flexNewUPB, currentRate, 480) : null);
     // Step 5 → forbear principal until target or 30% cap
@@ -1079,8 +1140,8 @@ function calcApprovalTerms(optionName, l) {
     // Determine which step achieves target
     let achievedPI = null, achievedRate2 = currentRate, achievedTerm2 = remainingTerm || 360, stepApplied2 = "", achievedForbear = 0;
     if (step1PI != null && target20Plus != null && step1PI <= target20Plus) {
-      stepApplied2 = "Step 1 (re-amortize at current rate, remaining term) — >20% target met";
-      achievedPI = step1PI; achievedRate2 = currentRate; achievedTerm2 = remainingTerm || 360;
+      stepApplied2 = fhlmcIsARM ? "Step 1 (re-amortize at preliminary rate — lower of note/fully-indexed, remaining term) — >20% target met" : "Step 1 (re-amortize at current rate, remaining term) — >20% target met";
+      achievedPI = step1PI; achievedRate2 = fhlmcPrelimRate; achievedTerm2 = remainingTerm || 360;
     } else if (step3PI != null && target20Plus != null && step3PI <= target20Plus && canReduceRate) {
       stepApplied2 = "Step 3 (rate reduced to FM floor rate, remaining term) — >20% target met";
       achievedPI = step3PI; achievedRate2 = rateFloor || currentRate; achievedTerm2 = remainingTerm || 360;
@@ -1094,9 +1155,10 @@ function calcApprovalTerms(optionName, l) {
       stepApplied2 = step4PI != null ? "Steps 1–5 attempted — target not achieved (offer if P&I ≤ pre-mod)" : "Enter loan data for step analysis";
       achievedPI = step4PI || step1PI; achievedRate2 = (rateFloor && canReduceRate) ? rateFloor : currentRate; achievedTerm2 = 480;
     }
-    const achievedPITI2 = achievedPI != null ? achievedPI + escrow : null;
+    const achievedPITI2 = achievedPI != null ? achievedPI + escrow + fhlmcEscShortageSpread : null;
     const piReductionPct2 = currentPI_val > 0 && achievedPI != null ? (currentPI_val - achievedPI) / currentPI_val * 100 : null;
-    const newMat480fhlmc = noteFirstPmt ? addMonths(effDate, 480) : null;
+    // Per §9206.6: 480-month term measured from modification effective date (not original note date)
+    const newMat480fhlmc = addMonths(effDate, 480);
     const newMatFHLMC = achievedTerm2 === 480 ? newMat480fhlmc : addMonths(effDate, achievedTerm2);
     const piEligible = achievedPI != null && currentPI_val > 0 && achievedPI <= currentPI_val;
     const isStreamlined = opt.includes("Streamlined");
@@ -1113,7 +1175,16 @@ function calcApprovalTerms(optionName, l) {
       "New UPB (Post-Capitalization)": fmt$(flexNewUPB),
       "Post-Mod MTMLTV": mtmltv != null ? `${mtmltv.toFixed(1)}% (${fmt$(flexNewUPB)} / ${fmt$(propValue)})` : "Enter property value for MTMLTV",
       "FM Posted Modification Rate (Floor)": rateFloor != null ? fmtPct(rateFloor) : "Enter FM posted mod rate",
-      "Rate Relief Applied?": canReduceRate ? (rateFloor && rateFloor < currentRate ? "✅ Yes — MTMLTV ≥ 50%" : "Rate already at or below floor") : "❌ No — MTMLTV < 50%",
+      "Loan Type": fhlmcIsARM ? "Adjustable Rate Mortgage (ARM)" : "Fixed Rate Mortgage",
+      ...(fhlmcIsARM ? {
+        "  → ARM Current Index Rate": fhlmcIndex > 0 ? fmtPct(fhlmcIndex) : "Enter current index rate",
+        "  → ARM Margin": fhlmcMarginVal > 0 ? fmtPct(fhlmcMarginVal) : "Enter margin",
+        "  → ARM Fully-Indexed Rate (nearest 0.125%)": fhlmcFullyIndexed != null ? fmtPct(fhlmcFullyIndexed) : "Enter index and margin",
+      } : {}),
+      "Step 2 (Preliminary Rate)": fhlmcIsARM
+        ? `${fmtPct(fhlmcPrelimRate)} — ${fhlmcFullyIndexed != null && fhlmcFullyIndexed < currentRate ? "fully-indexed rate (lower than note rate)" : "current note rate (lower than fully-indexed)"}`
+        : "Fixed-rate loan — preliminary rate equals current note rate (no change in Step 2)",
+      "Rate Relief Applied? (Step 3)": canReduceRate ? (rateFloor && rateFloor < currentRate ? `✅ Yes — MTMLTV ${mtmltv != null ? mtmltv.toFixed(1)+"%" : "(unknown)"} ≥ 80% (§9206.6)` : "Rate already at or below FM posted rate") : `❌ No — MTMLTV ${mtmltv != null ? mtmltv.toFixed(1)+"%" : "unknown"} < 80% required (§9206.6)`,
       "New Interest Rate": achievedRate2 > 0 ? fmtPct(achievedRate2) : "N/A",
       "New Term": achievedTerm2 ? `${achievedTerm2} months (${(achievedTerm2/12).toFixed(1)} years)` : "N/A",
       ...(achievedForbear > 0 ? {
@@ -1125,11 +1196,14 @@ function calcApprovalTerms(optionName, l) {
       } : {}),
       "New Monthly P&I (Interest-Bearing UPB)": fmt$(achievedPI),
       "New Monthly Escrow": fmt$(escrow || null),
+      ...(fhlmcEscShortageSpread > 0 ? { "  → Escrow Shortage Monthly Spread (÷60)": fmt$(fhlmcEscShortageSpread) + ` — from ${fmt$(escShortage)} shortage spread over 60 months` } : {}),
+      "  → Total Monthly Escrow (incl. shortage spread)": fhlmcEscShortageSpread > 0 ? fmt$(escrow + fhlmcEscShortageSpread) : "No shortage",
       "New Monthly PITI": fmt$(achievedPITI2),
       "P&I Reduction": piReductionPct2 != null ? `${piReductionPct2.toFixed(1)}% (${fmt$(currentPI_val)} → ${fmt$(achievedPI)})` : "Enter current P&I",
       "P&I Reduction > 20%? (Target)": piReductionPct2 != null ? (piReductionPct2 > 20 ? `✅ Yes — ${piReductionPct2.toFixed(1)}%` : `⚠️ No (${piReductionPct2.toFixed(1)}%) — still offer if new P&I ≤ pre-mod P&I`) : "Enter current P&I",
       "New P&I ≤ Pre-Mod P&I? (Minimum Requirement)": piEligible ? `✅ Yes — eligible to offer` : (achievedPI != null && currentPI_val > 0 ? `❌ No — modification cannot be offered` : "Enter current P&I"),
       "New Maturity Date": fmtDate(newMatFHLMC),
+      "  → Maturity Basis": achievedTerm2 === 480 ? "480 months from modification effective date (§9206.6)" : "Re-amortized over remaining loan term",
       "New First Payment Date": fmtDate(newFirstPmt),
       "Trial Period Plan": "3 monthly payments at estimated post-modified amount",
       "TPP — First Payment Due": "Last day of first Trial Period month",
@@ -1186,6 +1260,8 @@ function calcApprovalTerms(optionName, l) {
       "6-Month End Date": fmtDate(end6mo),
       "12-Month Maximum End Date": fmtDate(end12mo),
       "Disaster Variant": "Up to 3 months without QRPC if FEMA-declared, <2mo DLQ at disaster, ≥1mo DLQ at eval",
+      "QRPC Status": l.fnmaQRPCAchieved ? "✅ Achieved — proceed with standard forbearance plan" : "⚠️ Not yet achieved — disaster forbearance (≤3mo) may proceed without QRPC per D2-3.2-01; standard plans require QRPC",
+      "QRPC Requirement": "Qualified Right Party Contact required before establishing non-disaster forbearance plans > 3 months",
       "Post-Forbearance (QRPC not achieved)": "Evaluate → Payment Deferral; if ineligible → Flex Modification",
       "Authority": "Fannie Mae Servicing Guide D2-3.2-01 (10/11/2023)",
     };
@@ -1283,12 +1359,21 @@ function calcApprovalTerms(optionName, l) {
     const preWorkoutUPB = upb + priorDeferredUPB; // SMDU pre-workout UPB (servicer UPB + prior deferred balance)
     const flexNewUPB = preWorkoutUPB + arrears + legal; // post-capitalization UPB
     const currentPI_val = n(l.currentPI);
+    // ARM Preliminary Rate (Step 1 per D2-3.2-06): For ARMs, use lower of current note rate or fully-indexed rate (index + margin, nearest 0.125%)
+    const fnmaMortgageType = l.fnmaMortgageType || "Fixed Rate";
+    const isARM = fnmaMortgageType === "ARM";
+    const fnmaIndex = n(l.fnmaCurrentIndex);
+    const fnmaMarginVal = n(l.fnmaMargin);
+    const fullyIndexedRate = isARM && fnmaIndex > 0 && fnmaMarginVal > 0 ? Math.round((fnmaIndex + fnmaMarginVal) * 8) / 8 : null;
+    const preliminaryRate = isARM && fullyIndexedRate != null ? Math.min(currentRate, fullyIndexedRate) : currentRate;
+    // Escrow shortage 60-month spread (per D2-3.2-06: spread over escrow analysis, not capitalized)
+    const escShortageMonthlySpread = escShortage > 0 ? escShortage / 60 : 0;
     const floorRate = pmms > 0 ? Math.max(pmms - 0.50, 4.625) : 4.625;
     // Rate can only be REDUCED — never increased. If current rate < floor, rate stays at current.
     const effectiveRate = currentRate > 0 ? Math.min(floorRate, currentRate) : floorRate;
     const rateAtFloor = currentRate > 0 && currentRate <= floorRate;
-    // Step 1: Re-amortize at current rate for remaining term
-    const step1PI = remainingTerm && currentRate > 0 && flexNewUPB > 0 ? calcMonthlyPI(flexNewUPB, currentRate, remainingTerm) : null;
+    // Step 1: Re-amortize at preliminary rate for remaining term (for ARMs: lower of note rate / fully-indexed rate)
+    const step1PI = remainingTerm && preliminaryRate > 0 && flexNewUPB > 0 ? calcMonthlyPI(flexNewUPB, preliminaryRate, remainingTerm) : null;
     // Step 2: Rate reduced to effective rate (min of floor and current), same remaining term
     const step2PI = remainingTerm && effectiveRate > 0 && flexNewUPB > 0 ? calcMonthlyPI(flexNewUPB, effectiveRate, remainingTerm) : null;
     // Step 3: Extend term to 480 months at effective rate
@@ -1310,8 +1395,8 @@ function calcApprovalTerms(optionName, l) {
     let appliedForbearance = 0;
     let interestBearingUPB = flexNewUPB;
     if (step1PI != null && targetPI20 != null && step1PI <= targetPI20) {
-      stepApplied = "Step 1: Re-amortize at current rate — 20% target met";
-      achievedRate = currentRate; achievedTerm = remainingTerm || 360; achievedPI = step1PI;
+      stepApplied = isARM ? "Step 1: Re-amortize at preliminary rate (lower of note rate/fully-indexed) — 20% target met" : "Step 1: Re-amortize at current rate — 20% target met";
+      achievedRate = preliminaryRate; achievedTerm = remainingTerm || 360; achievedPI = step1PI;
     } else if (step2PI != null && targetPI20 != null && step2PI <= targetPI20) {
       stepApplied = rateAtFloor ? "Step 2: Rate stays at current (already at/below floor) — 20% target met" : "Step 2: Rate reduced to floor rate — 20% target met";
       achievedRate = effectiveRate; achievedTerm = remainingTerm || 360; achievedPI = step2PI;
@@ -1332,9 +1417,10 @@ function calcApprovalTerms(optionName, l) {
       stepApplied = "Enter loan data for step analysis";
       achievedRate = effectiveRate; achievedTerm = 480; achievedPI = step3PI;
     }
-    const achievedPITI = achievedPI != null ? achievedPI + escrow : null;
+    const achievedPITI = achievedPI != null ? achievedPI + escrow + escShortageMonthlySpread : null;
     const piReductionPct = currentPI_val > 0 && achievedPI != null ? (currentPI_val - achievedPI) / currentPI_val * 100 : null;
-    const newMat480 = noteFirstPmt ? addMonths(noteFirstPmt, 480) : null;
+    // Per D2-3.2-06: 480-month term is measured from the modified loan's first payment due date
+    const newMat480 = addMonths(newFirstPmt, 480);
     const newMatStd = addMonths(effDate, achievedTerm);
     const newMaturity = achievedTerm === 480 ? newMat480 : newMatStd;
     const tppMonths = dlqMonths >= 1 ? "3-month TPP (31+ days DLQ)" : "4-month TPP (current or <31 DLQ)";
@@ -1348,6 +1434,13 @@ function calcApprovalTerms(optionName, l) {
       "  → Escrow Shortage (EXCLUDED)": escShortage > 0 ? `${fmt$(escShortage)} — NOT capitalized per D2-3.2-06` : "None",
       "  → Late Fees (EXCLUDED)": lateFees > 0 ? `${fmt$(lateFees)} — NOT capitalized` : "None",
       "Post-Cap UPB": fmt$(flexNewUPB),
+      ...(isARM ? {
+        "Loan Type": "Adjustable Rate Mortgage (ARM)",
+        "ARM Current Index Rate": fnmaIndex > 0 ? fmtPct(fnmaIndex) : "Enter current index rate",
+        "ARM Margin": fnmaMarginVal > 0 ? fmtPct(fnmaMarginVal) : "Enter margin",
+        "ARM Fully-Indexed Rate (nearest 0.125%)": fullyIndexedRate != null ? fmtPct(fullyIndexedRate) : "Enter index and margin",
+        "Step 1 Preliminary Rate": fmtPct(preliminaryRate) + (isARM && fullyIndexedRate != null && fullyIndexedRate < currentRate ? " (fully-indexed rate — lower than note rate)" : " (current note rate — lower than fully-indexed)"),
+      } : { "Loan Type": "Fixed Rate Mortgage" }),
       "Floor Rate (PMMS−50bps, min 4.625%)": pmms > 0 ? fmtPct(floorRate) : "Enter PMMS rate",
       "Rate Note": rateAtFloor && currentRate > 0 ? `Current rate ${fmtPct(currentRate)} is at or below floor — rate stays unchanged (rate can only be reduced, not increased)` : `Current rate ${currentRate > 0 ? fmtPct(currentRate) : "N/A"} → reduced to floor if needed`,
       "New Interest Rate": achievedRate > 0 ? fmtPct(achievedRate) : "N/A",
@@ -1358,10 +1451,13 @@ function calcApprovalTerms(optionName, l) {
       "  → 30% Forbearance Cap": appliedForbearance > 0 ? fmt$(maxForbearance) : "N/A",
       "New Monthly P&I": fmt$(achievedPI),
       "New Monthly Escrow": fmt$(escrow || null),
+      ...(escShortageMonthlySpread > 0 ? { "  → Escrow Shortage Monthly Spread (÷60)": fmt$(escShortageMonthlySpread) + ` — from ${fmt$(escShortage)} shortage spread over 60 months` } : {}),
+      "  → Total Monthly Escrow (incl. shortage spread)": escShortageMonthlySpread > 0 ? fmt$(escrow + escShortageMonthlySpread) : "No shortage",
       "New Monthly PITI": fmt$(achievedPITI),
       "P&I Reduction": piReductionPct != null ? `${piReductionPct.toFixed(1)}% (${fmt$(currentPI_val)} → ${fmt$(achievedPI)})` : "Enter current P&I",
       "P&I Reduction ≥ 20%?": piReductionPct != null ? (piReductionPct >= 20 ? `✅ Yes — ${piReductionPct.toFixed(1)}%` : `❌ No — ${piReductionPct.toFixed(1)}%`) : "Enter current P&I",
       "New Maturity Date": fmtDate(newMaturity),
+      "  → Maturity Basis": achievedTerm === 480 ? "480 months from modified first payment date (D2-3.2-06)" : "Re-amortized over remaining loan term",
       "New First Payment Date": fmtDate(newFirstPmt),
       "Trial Period Plan": tppMonths,
       "Escrow Shortage": escShortage > 0 ? `${fmt$(escShortage)} — spread over 60-month escrow analysis (not capitalized)` : "None",
@@ -1409,25 +1505,48 @@ function node(q, a, pass) { return { question:q, answer:String(a), pass }; }
 function evaluateFHA(l) {
   const results = [];
   const dlq=n(l.delinquencyMonths), priorHAMP=n(l.priorFHAHAMPMonths), pcPct=n(l.partialClaimPct), gmi=n(l.grossMonthlyIncome);
+  const origUpbFHA = n(l.originalUpb) || n(l.upb);
+  const capAmtFHA = n(l.arrearagesToCapitalize) + n(l.escrowShortage) + n(l.legalFees);
+  const newUPBFHA = n(l.upb) + capAmtFHA;
+  const upbWithinOrig = origUpbFHA === 0 || newUPBFHA <= origUpbFHA;
   const baseNodes=[node("Occupancy=Owner Occupied",l.occupancyStatus,l.occupancyStatus==="Owner Occupied"),node("Foreclosure≠Active",!l.foreclosureActive,!l.foreclosureActive),node("Property≠Condemned/Uninhabitable",l.propertyCondition,l.propertyCondition!=="Condemned"&&l.propertyCondition!=="Uninhabitable"),node("Property=Principal Residence",l.propertyDisposition,l.propertyDisposition==="Principal Residence"),node("Lien=First",l.lienPosition,l.lienPosition==="First")];
   const baseEligible=baseNodes.every(nd=>nd.pass);
+
+  // ── Auto-compute whether 31% target is achievable via re-amortization ──
+  // Uses same math as calcApprovalTerms so eligibility always matches displayed terms.
+  // Falls back to manual toggle only when required inputs are missing.
+  const fhaPmms = n(l.pmmsRate);
+  const fhaEscrow = n(l.currentEscrow);
+  const fhaTarget = n(l.targetPayment) || (gmi > 0 ? gmi * 0.31 : 0);
+  const fhaHasInputs = fhaPmms > 0 && fhaTarget > 0 && newUPBFHA > 0;
+  const fhaPITI360 = fhaHasInputs ? (calcMonthlyPI(newUPBFHA, fhaPmms, 360) ?? 0) + fhaEscrow : null;
+  const fhaPITI480 = fhaHasInputs ? (calcMonthlyPI(newUPBFHA, fhaPmms, 480) ?? 0) + fhaEscrow : null;
+  const canAchieve360 = fhaPITI360 != null ? fhaPITI360 <= fhaTarget : l.canAchieveTargetByReamort;
+  const canAchieve480 = fhaPITI480 != null ? fhaPITI480 <= fhaTarget : l.canAchieveTargetBy480Reamort;
+  const achieve360Label = fhaHasInputs
+    ? `PITI $${fhaPITI360!.toFixed(2)} ${canAchieve360?"≤":">"} target $${fhaTarget.toFixed(2)}`
+    : `Manual: ${canAchieve360?"Yes":"No"}`;
+  const achieve480Label = fhaHasInputs
+    ? `PITI $${fhaPITI480!.toFixed(2)} ${canAchieve480?"≤":">"} target $${fhaTarget.toFixed(2)}`
+    : `Manual: ${canAchieve480?"Yes":"No"}`;
+
   if (l.verifiedDisaster) {
     const dn=[...baseNodes,node("In PDMA",l.propertyInPDMA,l.propertyInPDMA),node("Principal Residence pre-disaster",l.principalResidencePreDisaster,l.principalResidencePreDisaster),node("DLQ<12mo",dlq,dlq<12),node("Not damaged OR repairs done",l.propertySubstantiallyDamaged?l.repairsCompleted:"N/A",!l.propertySubstantiallyDamaged||l.repairsCompleted)];
     const db=dn.every(nd=>nd.pass);
-    results.push({option:"FHA Disaster Loan Modification",eligible:db&&l.canAchieveTargetByReamort&&(l.currentOrLe30DaysAtDisaster||l.incomeGePreDisaster||l.incomeDocProvided),nodes:[...dn,node("Can achieve target",l.canAchieveTargetByReamort,l.canAchieveTargetByReamort),node("Income/DLQ condition",l.currentOrLe30DaysAtDisaster||l.incomeGePreDisaster||l.incomeDocProvided,l.currentOrLe30DaysAtDisaster||l.incomeGePreDisaster||l.incomeDocProvided)],note:!l.incomeDocProvided?"3-mo trial plan available":null});
-    results.push({option:"FHA Disaster Standalone Partial Claim",eligible:db&&!l.canAchieveTargetByReamort&&pcPct<=30,nodes:[...dn,node("Cannot achieve target",!l.canAchieveTargetByReamort,!l.canAchieveTargetByReamort),node(`PC(${pcPct}%)≤30%`,pcPct,pcPct<=30)]});
+    results.push({option:"FHA Disaster Loan Modification",eligible:db&&canAchieve360&&(l.currentOrLe30DaysAtDisaster||l.incomeGePreDisaster||l.incomeDocProvided),nodes:[...dn,node("Target achievable by re-amortization",achieve360Label,canAchieve360),node("Income/DLQ condition",l.currentOrLe30DaysAtDisaster||l.incomeGePreDisaster||l.incomeDocProvided,l.currentOrLe30DaysAtDisaster||l.incomeGePreDisaster||l.incomeDocProvided)],note:!l.incomeDocProvided?"3-mo trial plan available":null});
+    results.push({option:"FHA Disaster Standalone Partial Claim",eligible:db&&!canAchieve360&&pcPct<=30,nodes:[...dn,node("Target NOT achievable by re-amortization",achieve360Label,!canAchieve360),node(`PC(${pcPct}%)≤30%`,pcPct,pcPct<=30)]});
   }
   const hb=baseEligible&&(priorHAMP===0||priorHAMP>=24)&&l.continuousIncome&&dlq>0&&STANDARD_HARDSHIPS.includes(l.hardshipType)&&l.borrowerIntentRetention;
   const hn=[...baseNodes,node("Std hardship",l.hardshipType,STANDARD_HARDSHIPS.includes(l.hardshipType)),node("Continuous income",l.continuousIncome,l.continuousIncome),node("DLQ>0",dlq,dlq>0),node("Prior HAMP≥24mo or none",priorHAMP===0?"None":priorHAMP+"mo",priorHAMP===0||priorHAMP>=24),node("Intent=Retain",l.borrowerIntentRetention,l.borrowerIntentRetention)];
-  results.push({option:"FHA-HAMP Standalone Loan Modification",eligible:hb&&l.canAchieveTargetByReamort,nodes:[...hn,node("Target achievable 360mo",l.canAchieveTargetByReamort,l.canAchieveTargetByReamort)],calc:gmi>0?`Target 31% GMI: $${(gmi*0.31).toFixed(2)}/mo`:null});
-  results.push({option:"FHA 40-Year Loan Modification",eligible:hb&&!l.canAchieveTargetByReamort&&l.canAchieveTargetBy480Reamort,nodes:[...hn,node("Cannot achieve 360mo target",!l.canAchieveTargetByReamort,!l.canAchieveTargetByReamort),node("Can achieve 480mo target",l.canAchieveTargetBy480Reamort,l.canAchieveTargetBy480Reamort)],note:"ML 2023-22 — eff. May 2024; rate=PMMS; term=480mo",calc:gmi>0?`Target 31% GMI: $${(gmi*0.31).toFixed(2)}/mo`:null});
-  results.push({option:"FHA-HAMP Standalone Partial Claim",eligible:hb&&!l.canAchieveTargetByReamort&&l.currentRateAtOrBelowMarket&&l.currentPITIAtOrBelowTarget&&pcPct<=30,nodes:[...hn,node("Cannot achieve target",!l.canAchieveTargetByReamort,!l.canAchieveTargetByReamort),node("Rate≤market",l.currentRateAtOrBelowMarket,l.currentRateAtOrBelowMarket),node("PITI≤target",l.currentPITIAtOrBelowTarget,l.currentPITIAtOrBelowTarget),node(`PC(${pcPct}%)≤30%`,pcPct,pcPct<=30)]});
+  results.push({option:"FHA-HAMP Standalone Loan Modification",eligible:hb&&canAchieve360,nodes:[...hn,node("Target achievable by 360mo re-amortization",achieve360Label,canAchieve360)],calc:gmi>0?`Target 31% GMI: $${(gmi*0.31).toFixed(2)}/mo`:null});
+  results.push({option:"FHA 40-Year Loan Modification",eligible:hb&&!canAchieve360&&canAchieve480&&upbWithinOrig,nodes:[...hn,node("Target NOT achievable in 360mo",achieve360Label,!canAchieve360),node("Target achievable by 480mo re-amortization",achieve480Label,canAchieve480),node("New UPB ≤ Original UPB (ML 2023-22)",upbWithinOrig?"Yes — required":"No — ineligible",upbWithinOrig)],note:"ML 2023-22 — eff. May 2024; rate=PMMS; term=480mo",calc:gmi>0?`Target 31% GMI: $${(gmi*0.31).toFixed(2)}/mo`:null});
+  results.push({option:"FHA-HAMP Standalone Partial Claim",eligible:hb&&l.currentRateAtOrBelowMarket&&l.currentPITIAtOrBelowTarget&&pcPct<=30,nodes:[...hn,node("Rate at/below market (no mod needed)",l.currentRateAtOrBelowMarket,l.currentRateAtOrBelowMarket),node("Current PITI at/below 31% target",l.currentPITIAtOrBelowTarget,l.currentPITIAtOrBelowTarget),node(`PC(${pcPct}%)≤30% of orig UPB`,pcPct,pcPct<=30)]});
   const cok=pcPct<=30||(l.arrearsExceed30PctLimit&&l.modPaymentLe40PctGMI);
-  results.push({option:"FHA-HAMP Combo Loan Modification & Partial Claim",eligible:hb&&!l.canAchieveTargetByReamort&&cok,nodes:[...hn,node("Cannot achieve target",!l.canAchieveTargetByReamort,!l.canAchieveTargetByReamort),node("PC≤30% OR 40% exception",cok,cok)],note:l.arrearsExceed30PctLimit&&l.modPaymentLe40PctGMI?"40% GMI exception applied":null,calc:gmi>0?`40% Cap: $${(gmi*0.40).toFixed(2)} | 31% Target: $${(gmi*0.31).toFixed(2)}`:null});
-  results.push({option:"Payment Supplement",eligible:baseEligible&&!l.canAchieveTargetByReamort&&l.unemployed&&l.comboPaymentLe40PctIncome,nodes:[...baseNodes,node("Cannot achieve target",!l.canAchieveTargetByReamort,!l.canAchieveTargetByReamort),node("Unemployed",l.unemployed,l.unemployed),node("Combo pmt≤40% GMI",l.comboPaymentLe40PctIncome,l.comboPaymentLe40PctIncome)]});
+  results.push({option:"FHA-HAMP Combo Loan Modification & Partial Claim",eligible:hb&&!canAchieve360&&cok,nodes:[...hn,node("Target NOT achievable by 360mo re-amortization",achieve360Label,!canAchieve360),node("PC≤30% OR 40% exception",cok,cok)],note:l.arrearsExceed30PctLimit&&l.modPaymentLe40PctGMI?"40% GMI exception applied":null,calc:gmi>0?`40% Cap: $${(gmi*0.40).toFixed(2)} | 31% Target: $${(gmi*0.31).toFixed(2)}`:null});
+  results.push({option:"Payment Supplement",eligible:baseEligible&&!canAchieve360&&l.unemployed&&l.comboPaymentLe40PctIncome,nodes:[...baseNodes,node("Target NOT achievable by re-amortization",achieve360Label,!canAchieve360),node("Unemployed",l.unemployed,l.unemployed),node("Combo pmt≤40% GMI",l.comboPaymentLe40PctIncome,l.comboPaymentLe40PctIncome)]});
   results.push({option:"Repayment Plan",eligible:dlq<=12&&l.canRepayWithin24Months&&!l.failedTPP,nodes:[node("DLQ≤12mo",dlq,dlq<=12),node("Can repay 24mo",l.canRepayWithin24Months,l.canRepayWithin24Months),node("No failed TPP",!l.failedTPP,!l.failedTPP)]});
   results.push({option:"Formal Forbearance",eligible:dlq<12&&(l.canRepayWithin6Months||l.requestedForbearance),nodes:[node("DLQ<12mo",dlq,dlq<12),node("Repay 6mo OR requested",l.canRepayWithin6Months||l.requestedForbearance,l.canRepayWithin6Months||l.requestedForbearance)]});
-  results.push({option:"Special Forbearance – Unemployment",eligible:dlq>=3&&dlq<=12&&!l.foreclosureActive&&l.hardshipType==="Unemployment"&&l.occupancyStatus==="Owner Occupied"&&l.propertyDisposition==="Principal Residence"&&l.verifiedUnemployment&&!l.continuousIncome&&l.ineligibleAllRetention&&!l.propertyListedForSale&&!l.assumptionInProcess,nodes:[node("DLQ 3-12mo",dlq,dlq>=3&&dlq<=12),node("Hardship=Unemployment",l.hardshipType,l.hardshipType==="Unemployment"),node("Verified unemployment",l.verifiedUnemployment,l.verifiedUnemployment),node("No continuous income",!l.continuousIncome,!l.continuousIncome),node("Ineligible all retention",l.ineligibleAllRetention,l.ineligibleAllRetention),node("Not listed for sale",!l.propertyListedForSale,!l.propertyListedForSale),node("No assumption",!l.assumptionInProcess,!l.assumptionInProcess)]});
+  results.push({option:"Special Forbearance – Unemployment",eligible:dlq<=12&&!l.foreclosureActive&&l.hardshipType==="Unemployment"&&l.occupancyStatus==="Owner Occupied"&&l.propertyDisposition==="Principal Residence"&&l.verifiedUnemployment&&!l.continuousIncome&&l.ineligibleAllRetention&&!l.propertyListedForSale&&!l.assumptionInProcess,nodes:[node("DLQ≤12mo",dlq,dlq<=12),node("Hardship=Unemployment",l.hardshipType,l.hardshipType==="Unemployment"),node("Verified unemployment",l.verifiedUnemployment,l.verifiedUnemployment),node("No continuous income",!l.continuousIncome,!l.continuousIncome),node("Ineligible all retention",l.ineligibleAllRetention,l.ineligibleAllRetention),node("Not listed for sale",!l.propertyListedForSale,!l.propertyListedForSale),node("No assumption",!l.assumptionInProcess,!l.assumptionInProcess)]});
   if (l.meetsPFSRequirements) results.push({option:"Pre-Foreclosure Sale (PFS)",eligible:true,nodes:[node("Meets PFS req","Yes",true)]});
   if (l.outstandingDebtUncurable&&l.meetsDILRequirements) results.push({option:"Deed-in-Lieu (DIL)",eligible:true,nodes:[node("Meets DIL req","Yes",true)]});
   return results;
@@ -1437,15 +1556,19 @@ function evaluateUSDA(l) {
   const dlqD=n(l.delinquencyDays)||n(l.delinquencyMonths)*30, dlqM=n(l.delinquencyMonths), nm=parseInt(l.usdaNumPrevMods)||0;
   const isD=l.hardshipType==="Disaster", ltp=l.hardshipDuration==="Long Term"||l.hardshipDuration==="Permanent";
   const br=l.propertyCondition!=="Condemned"&&l.propertyCondition!=="Uninhabitable"&&!l.occupancyAbandoned&&l.lienPosition==="First";
-  const ib=dlqD>0&&dlqD<360&&l.borrowerIntentRetention&&l.hardshipDuration==="Short Term"&&l.usdaHardshipNotExcluded&&l.lienPosition==="First"&&l.propertyCondition!=="Condemned"&&!l.occupancyAbandoned&&l.occupancyStatus==="Owner Occupied"&&(l.usdaForbearancePeriodLt12||l.usdaTotalDLQLt12);
-  const iN=[node("DLQ>0&<360d",dlqD,dlqD>0&&dlqD<360),node("Intent=Retain",l.borrowerIntentRetention,l.borrowerIntentRetention),node("Short Term hardship",l.hardshipDuration,l.hardshipDuration==="Short Term"),node("Not excluded type",l.usdaHardshipNotExcluded,l.usdaHardshipNotExcluded),node("Lien=First",l.lienPosition,l.lienPosition==="First"),node("Not Condemned",l.propertyCondition,l.propertyCondition!=="Condemned"),node("Not Abandoned",!l.occupancyAbandoned,!l.occupancyAbandoned),node("Owner Occupied",l.occupancyStatus,l.occupancyStatus==="Owner Occupied"),node("Forbearance or DLQ<12mo",l.usdaForbearancePeriodLt12||l.usdaTotalDLQLt12,l.usdaForbearancePeriodLt12||l.usdaTotalDLQLt12)];
-  results.push({option:"USDA Informal Forbearance",eligible:ib&&l.hardshipDuration==="Short Term",nodes:iN});
-  results.push({option:"USDA Informal Repayment Plan",eligible:ib&&l.hardshipDuration==="Resolved"&&l.usdaNewPaymentLe200pct&&l.usdaBorrowerPositiveNetIncome,nodes:[...iN,node("Hardship Resolved",l.hardshipDuration,l.hardshipDuration==="Resolved"),node("Payment≤200%",l.usdaNewPaymentLe200pct,l.usdaNewPaymentLe200pct),node("Positive net income",l.usdaBorrowerPositiveNetIncome,l.usdaBorrowerPositiveNetIncome)]});
+  // Informal Forbearance base: allows pre-default (dlqD >= 0) per HB-1-3555 §18.4
+  const ib=dlqD>=0&&dlqD<360&&l.borrowerIntentRetention&&l.hardshipDuration==="Short Term"&&l.usdaHardshipNotExcluded&&l.lienPosition==="First"&&l.propertyCondition!=="Condemned"&&!l.occupancyAbandoned&&l.occupancyStatus==="Owner Occupied"&&(l.usdaForbearancePeriodLt12||l.usdaTotalDLQLt12);
+  const iN=[node("DLQ<360d",dlqD,dlqD>=0&&dlqD<360),node("Intent=Retain",l.borrowerIntentRetention,l.borrowerIntentRetention),node("Short Term hardship",l.hardshipDuration,l.hardshipDuration==="Short Term"),node("Not excluded type",l.usdaHardshipNotExcluded,l.usdaHardshipNotExcluded),node("Lien=First",l.lienPosition,l.lienPosition==="First"),node("Not Condemned",l.propertyCondition,l.propertyCondition!=="Condemned"),node("Not Abandoned",!l.occupancyAbandoned,!l.occupancyAbandoned),node("Owner Occupied",l.occupancyStatus,l.occupancyStatus==="Owner Occupied"),node("Forbearance or DLQ<12mo",l.usdaForbearancePeriodLt12||l.usdaTotalDLQLt12,l.usdaForbearancePeriodLt12||l.usdaTotalDLQLt12)];
+  // Repayment Plan base: hardship resolved (separate from forbearance base) per HB-1-3555 §18.4
+  const rb=dlqD>0&&dlqD<360&&l.borrowerIntentRetention&&l.hardshipDuration==="Resolved"&&l.usdaHardshipNotExcluded&&l.lienPosition==="First"&&l.propertyCondition!=="Condemned"&&!l.occupancyAbandoned&&l.occupancyStatus==="Owner Occupied";
+  const rN=[node("DLQ>0&<360d",dlqD,dlqD>0&&dlqD<360),node("Intent=Retain",l.borrowerIntentRetention,l.borrowerIntentRetention),node("Hardship=Resolved",l.hardshipDuration,l.hardshipDuration==="Resolved"),node("Not excluded type",l.usdaHardshipNotExcluded,l.usdaHardshipNotExcluded),node("Lien=First",l.lienPosition,l.lienPosition==="First"),node("Not Condemned",l.propertyCondition,l.propertyCondition!=="Condemned"),node("Not Abandoned",!l.occupancyAbandoned,!l.occupancyAbandoned),node("Owner Occupied",l.occupancyStatus,l.occupancyStatus==="Owner Occupied")];
+  results.push({option:"USDA Informal Forbearance",eligible:ib,nodes:iN});
+  results.push({option:"USDA Informal Repayment Plan",eligible:rb&&l.usdaNewPaymentLe200pct&&l.usdaBorrowerPositiveNetIncome,nodes:[...rN,node("Payment≤200% PITI",l.usdaNewPaymentLe200pct,l.usdaNewPaymentLe200pct),node("Positive net income",l.usdaBorrowerPositiveNetIncome,l.usdaBorrowerPositiveNetIncome)]});
   results.push({option:"USDA Disaster Forbearance",eligible:isD&&br&&l.occupancyStatus==="Owner Occupied",nodes:[node("Hardship=Disaster",isD,isD),node("Base eligibility",br,br),node("Owner Occupied",l.occupancyStatus,l.occupancyStatus==="Owner Occupied")]});
   results.push({option:"USDA Special Forbearance",eligible:!isD&&br&&l.occupancyStatus==="Owner Occupied"&&dlqM<=12,nodes:[node("Not Disaster",!isD,!isD),node("Base eligibility",br,br),node("Owner Occupied",l.occupancyStatus,l.occupancyStatus==="Owner Occupied"),node("DLQ≤12mo",dlqM,dlqM<=12)]});
   const sb=br&&l.borrowerIntentRetention&&l.occupancyStatus==="Owner Occupied"&&nm<2&&!l.usdaPriorFailedStreamlineTPP&&dlqD>=90&&l.usdaUpbGe5000&&l.usdaPaymentsMade12&&l.usdaBankruptcyNotActive&&l.usdaLitigationNotActive&&l.usdaForeclosureSaleGe60Away;
   results.push({option:"USDA Streamline Loan Modification",eligible:sb,nodes:[node("≥90d DLQ",dlqD,dlqD>=90),node("UPB≥$5k",l.usdaUpbGe5000,l.usdaUpbGe5000),node("12+ payments",l.usdaPaymentsMade12,l.usdaPaymentsMade12),node("Bankruptcy≠Active",l.usdaBankruptcyNotActive,l.usdaBankruptcyNotActive),node("Litigation≠Active",l.usdaLitigationNotActive,l.usdaLitigationNotActive),node("No failed Streamline TPP",!l.usdaPriorFailedStreamlineTPP,!l.usdaPriorFailedStreamlineTPP),node("Not Abandoned/Condemned",br,br),node("Intent=Retain",l.borrowerIntentRetention,l.borrowerIntentRetention),node("Owner Occupied",l.occupancyStatus,l.occupancyStatus==="Owner Occupied"),node("Lien=First",l.lienPosition,l.lienPosition==="First"),node("PrevMods<2",nm,nm<2),node("Foreclosure sale≥60d",l.usdaForeclosureSaleGe60Away,l.usdaForeclosureSaleGe60Away)]});
-  results.push({option:"USDA Standalone Mortgage Recovery Advance (MRA)",eligible:l.usdaBorrowerCanResumeCurrent&&(l.usdaHardshipDurationResolved||l.usdaLoanModIneligible)&&l.usdaBorrowerCannotCureDLQWithin12&&l.lienPosition==="First"&&l.propertyCondition!=="Condemned"&&!l.occupancyAbandoned&&dlqD>=61,nodes:[node("Can resume payment",l.usdaBorrowerCanResumeCurrent,l.usdaBorrowerCanResumeCurrent),node("Resolved OR Mod Ineligible",l.usdaHardshipDurationResolved||l.usdaLoanModIneligible,l.usdaHardshipDurationResolved||l.usdaLoanModIneligible),node("Cannot cure DLQ 12mo",l.usdaBorrowerCannotCureDLQWithin12,l.usdaBorrowerCannotCureDLQWithin12),node("Lien=First",l.lienPosition,l.lienPosition==="First"),node("Not Condemned",l.propertyCondition,l.propertyCondition!=="Condemned"),node("Not Abandoned",!l.occupancyAbandoned,!l.occupancyAbandoned),node("DLQ≥61d",dlqD,dlqD>=61)]});
+  results.push({option:"USDA Standalone Mortgage Recovery Advance (MRA)",eligible:l.usdaBorrowerCanResumeCurrent&&(l.usdaHardshipDurationResolved||l.usdaLoanModIneligible)&&l.usdaBorrowerCannotCureDLQWithin12&&l.lienPosition==="First"&&l.propertyCondition!=="Condemned"&&!l.occupancyAbandoned&&dlqD>=30,nodes:[node("Can resume payment",l.usdaBorrowerCanResumeCurrent,l.usdaBorrowerCanResumeCurrent),node("Resolved OR Mod Ineligible",l.usdaHardshipDurationResolved||l.usdaLoanModIneligible,l.usdaHardshipDurationResolved||l.usdaLoanModIneligible),node("Cannot cure DLQ 12mo",l.usdaBorrowerCannotCureDLQWithin12,l.usdaBorrowerCannotCureDLQWithin12),node("Lien=First",l.lienPosition,l.lienPosition==="First"),node("Not Condemned",l.propertyCondition,l.propertyCondition!=="Condemned"),node("Not Abandoned",!l.occupancyAbandoned,!l.occupancyAbandoned),node("DLQ≥30d (≥1 installment)",dlqD,dlqD>=30)]});
   results.push({option:"USDA Disaster Term Extension Modification",eligible:l.usdaPriorWorkoutDisasterForbearance&&isD&&l.usdaHardshipNotResolved&&l.lienPosition==="First"&&l.propertyCondition!=="Condemned"&&!l.occupancyAbandoned&&l.usdaDLQGe12Contractual&&l.usdaDLQAt30AtDisaster&&l.usdaLoanGe60DLQ&&l.usdaPrevWorkoutForbearance&&l.usdaWorkoutStateActivePassed,nodes:[node("Prior=Disaster Forbearance",l.usdaPriorWorkoutDisasterForbearance,l.usdaPriorWorkoutDisasterForbearance),node("Hardship=Disaster",isD,isD),node("Hardship≠Resolved",l.usdaHardshipNotResolved,l.usdaHardshipNotResolved),node("Lien=First",l.lienPosition,l.lienPosition==="First"),node("Not Condemned",l.propertyCondition,l.propertyCondition!=="Condemned"),node("Not Abandoned",!l.occupancyAbandoned,!l.occupancyAbandoned),node("DLQ≥12 Contractual",l.usdaDLQGe12Contractual,l.usdaDLQGe12Contractual),node("<30d DLQ at Declaration",l.usdaDLQAt30AtDisaster,l.usdaDLQAt30AtDisaster),node("Loan≥60d DLQ",l.usdaLoanGe60DLQ,l.usdaLoanGe60DLQ),node("Prev=Forbearance",l.usdaPrevWorkoutForbearance,l.usdaPrevWorkoutForbearance),node("Workout{Active,Passed}",l.usdaWorkoutStateActivePassed,l.usdaWorkoutStateActivePassed)]});
   results.push({option:"USDA Disaster Modification",eligible:isD&&l.lienPosition==="First"&&l.usdaDLQAt30AtDisaster&&l.hardshipDuration==="Resolved"&&l.propertyCondition!=="Condemned"&&!l.occupancyAbandoned&&l.usdaBorrowerCanResumePmtFalse&&l.usdaLoanGe30DaysDLQ&&l.usdaPostModPITILePreMod,nodes:[node("Hardship=Disaster",isD,isD),node("Lien=First",l.lienPosition,l.lienPosition==="First"),node("<30d at Declaration",l.usdaDLQAt30AtDisaster,l.usdaDLQAt30AtDisaster),node("Hardship=Resolved",l.hardshipDuration,l.hardshipDuration==="Resolved"),node("Not Condemned",l.propertyCondition,l.propertyCondition!=="Condemned"),node("Not Abandoned",!l.occupancyAbandoned,!l.occupancyAbandoned),node("Cannot resume pmt",l.usdaBorrowerCanResumePmtFalse,l.usdaBorrowerCanResumePmtFalse),node("Loan≥30d DLQ",l.usdaLoanGe30DaysDLQ,l.usdaLoanGe30DaysDLQ),node("Post-Mod PITI≤Pre",l.usdaPostModPITILePreMod,l.usdaPostModPITILePreMod)]});
   results.push({option:"USDA Disaster Mortgage Recovery Advance (MRA)",eligible:!l.usdaEligibleForDisasterExtension&&!l.usdaEligibleForDisasterMod&&isD&&l.lienPosition==="First"&&l.usdaDLQAt30AtDisaster&&l.hardshipDuration==="Resolved"&&l.usdaPriorWorkoutNotMRA&&l.usdaReinstatementLtMRACap&&l.propertyCondition!=="Condemned"&&!l.occupancyAbandoned&&l.usdaBorrowerCanResumePmtFalse&&l.usdaLoanGe30DaysDLQ&&l.usdaPostModPITILePreMod,nodes:[node("DisasterExt=FALSE",!l.usdaEligibleForDisasterExtension,!l.usdaEligibleForDisasterExtension),node("DisasterMod=FALSE",!l.usdaEligibleForDisasterMod,!l.usdaEligibleForDisasterMod),node("Hardship=Disaster",isD,isD),node("Prior≠MRA",l.usdaPriorWorkoutNotMRA,l.usdaPriorWorkoutNotMRA),node("Reinstatement<Cap",l.usdaReinstatementLtMRACap,l.usdaReinstatementLtMRACap),node("<30d at Declaration",l.usdaDLQAt30AtDisaster,l.usdaDLQAt30AtDisaster),node("Hardship=Resolved",l.hardshipDuration,l.hardshipDuration==="Resolved"),node("Cannot resume pmt",l.usdaBorrowerCanResumePmtFalse,l.usdaBorrowerCanResumePmtFalse),node("Post-Mod PITI≤Pre",l.usdaPostModPITILePreMod,l.usdaPostModPITILePreMod)]});
@@ -1459,13 +1582,20 @@ function evaluateVA(l) {
   const dlqD=n(l.delinquencyDays)||n(l.delinquencyMonths)*30, pcPct=n(l.partialClaimPct);
   // Base eligibility: first lien, not condemned, not abandoned, foreclosure NOT active
   const vb=l.lienPosition==="First"&&l.propertyCondition!=="Condemned"&&!l.occupancyAbandoned&&!l.foreclosureActive;
+  // Pre-compute cap checks for 30-Year / Traditional mod eligibility gates
+  const origUpbVA = n(l.originalUpb) || n(l.upb);
+  const capAmtVA = n(l.arrearagesToCapitalize) + n(l.escrowShortage) + n(l.legalFees);
+  const newUPBVA = n(l.upb) + capAmtVA;
+  const vaArrearsPct = origUpbVA > 0 ? (capAmtVA / origUpbVA * 100) : null;
+  const vaArrearsWithin25 = vaArrearsPct != null ? vaArrearsPct <= 25 : true;
+  const vaUPBWithinOrig = origUpbVA === 0 || newUPBVA <= origUpbVA;
   const rH=l.hardshipDuration==="Resolved", ltH=l.hardshipDuration==="Long Term"||l.hardshipDuration==="Permanent";
   const sH=STANDARD_HARDSHIPS.includes(l.hardshipType), isD=l.hardshipType==="Disaster";
   const oo=l.occupancyStatus==="Owner Occupied";
   const vN=[node("Lien=First",l.lienPosition,l.lienPosition==="First"),node("Not Condemned",l.propertyCondition,l.propertyCondition!=="Condemned"),node("Not Abandoned",!l.occupancyAbandoned,!l.occupancyAbandoned),node("Foreclosure≠Active",!l.foreclosureActive,!l.foreclosureActive)];
   if (isD){
     // Disaster forbearance: triggered by disaster declaration, no minimum DLQ threshold
-    results.push({option:"VA Disaster Forbearance",eligible:vb&&dlqD>=1&&l.dlqAtDisasterLt30&&(l.forbearancePeriodLt12||l.totalDLQLt12),nodes:[...vN,node("DLQ>0",dlqD,dlqD>=1),node("<30d at Declaration",l.dlqAtDisasterLt30,l.dlqAtDisasterLt30),node("Forbearance/DLQ<12mo",l.forbearancePeriodLt12||l.totalDLQLt12,l.forbearancePeriodLt12||l.totalDLQLt12)]});
+    results.push({option:"VA Disaster Forbearance",eligible:vb&&l.dlqAtDisasterLt30&&(l.forbearancePeriodLt12||l.totalDLQLt12),nodes:[...vN,node("<30d DLQ at Declaration",l.dlqAtDisasterLt30,l.dlqAtDisasterLt30),node("Forbearance/DLQ<12mo",l.forbearancePeriodLt12||l.totalDLQLt12,l.forbearancePeriodLt12||l.totalDLQLt12)]});
     results.push({option:"VA Disaster Modification",eligible:vb&&!l.activeRPP&&l.pmmsLeCurrentPlus1&&l.dlqAtDisasterLt30&&l.loanGe60DaysDLQ&&l.previousWorkoutForbearance&&l.workoutStateActivePassed,nodes:[...vN,node("ActiveRPP=False",!l.activeRPP,!l.activeRPP),node("PMMS≤Rate+1%",l.pmmsLeCurrentPlus1,l.pmmsLeCurrentPlus1),node("<30d at Declaration",l.dlqAtDisasterLt30,l.dlqAtDisasterLt30),node("Loan≥60d DLQ",l.loanGe60DaysDLQ,l.loanGe60DaysDLQ),node("Prev=Forbearance",l.previousWorkoutForbearance,l.previousWorkoutForbearance),node("Workout{Active,Passed}",l.workoutStateActivePassed,l.workoutStateActivePassed)]});
     results.push({option:"VA Disaster Extend Modification",eligible:vb&&l.hardshipDuration!=="Resolved"&&l.dlqGe12ContractualPayments&&l.dlqAtDisasterLt30&&l.loanGe60DaysDLQ&&l.previousWorkoutForbearance&&l.workoutStateActivePassed,nodes:[...vN,node("Hardship≠Resolved",l.hardshipDuration,l.hardshipDuration!=="Resolved"),node("DLQ≥12 Contractual",l.dlqGe12ContractualPayments,l.dlqGe12ContractualPayments),node("<30d at Declaration",l.dlqAtDisasterLt30,l.dlqAtDisasterLt30),node("Loan≥60d DLQ",l.loanGe60DaysDLQ,l.loanGe60DaysDLQ),node("Prev=Forbearance",l.previousWorkoutForbearance,l.previousWorkoutForbearance),node("Workout{Active,Passed}",l.workoutStateActivePassed,l.workoutStateActivePassed)]});
   }
@@ -1474,13 +1604,13 @@ function evaluateVA(l) {
   // 1. Reinstatement — VA M26-4 §2.A: first option; borrower pays all arrears in one lump sum
   results.push({option:"VA Reinstatement",eligible:vb&&rH&&dlqD>=1&&l.borrowerCanAffordReinstateOrRepay,nodes:[...vN,node("Hardship=Resolved",l.hardshipDuration,rH),node("DLQ>0",dlqD,dlqD>=1),node("Can afford reinstatement",l.borrowerCanAffordReinstateOrRepay,l.borrowerCanAffordReinstateOrRepay)]});
   // 2. Repayment Plan — resolved hardship, borrower can make regular payment + catch-up
-  results.push({option:"VA Repayment Plan",eligible:vb&&rH&&dlqD>=61&&l.calculatedRPPGt0&&l.borrowerCanAffordReinstateOrRepay&&l.borrowerIntentRetention&&oo,nodes:[...vN,node("Hardship=Resolved",l.hardshipDuration,rH),node("DLQ≥61d",dlqD,dlqD>=61),node("RPP Plans>0",l.calculatedRPPGt0,l.calculatedRPPGt0),node("Can afford RPP",l.borrowerCanAffordReinstateOrRepay,l.borrowerCanAffordReinstateOrRepay),node("Intent=Retain",l.borrowerIntentRetention,l.borrowerIntentRetention),node("Owner Occupied",l.occupancyStatus,oo)]});
+  results.push({option:"VA Repayment Plan",eligible:vb&&rH&&dlqD>=30&&l.calculatedRPPGt0&&l.borrowerCanAffordReinstateOrRepay&&l.borrowerIntentRetention&&oo,nodes:[...vN,node("Hardship=Resolved",l.hardshipDuration,rH),node("DLQ≥30d (≥1 installment)",dlqD,dlqD>=30),node("RPP Plans>0",l.calculatedRPPGt0,l.calculatedRPPGt0),node("Can afford RPP",l.borrowerCanAffordReinstateOrRepay,l.borrowerCanAffordReinstateOrRepay),node("Intent=Retain",l.borrowerIntentRetention,l.borrowerIntentRetention),node("Owner Occupied",l.occupancyStatus,oo)]});
   // 3. Special Forbearance — active/temporary hardship (Long Term, not Resolved and not Permanent)
-  results.push({option:"VA Special Forbearance",eligible:vb&&l.hardshipDuration==="Long Term"&&sH&&(l.forbearancePeriodLt12||l.totalDLQLt12)&&dlqD>=61&&l.borrowerIntentRetention&&oo,nodes:[...vN,node("Hardship=Long Term (active)",l.hardshipDuration,l.hardshipDuration==="Long Term"),node("Std hardship",l.hardshipType,sH),node("Forbearance/DLQ<12mo",l.forbearancePeriodLt12||l.totalDLQLt12,l.forbearancePeriodLt12||l.totalDLQLt12),node("DLQ≥61d",dlqD,dlqD>=61),node("Intent=Retain",l.borrowerIntentRetention,l.borrowerIntentRetention),node("Owner Occupied",l.occupancyStatus,oo)]});
+  results.push({option:"VA Special Forbearance",eligible:vb&&l.hardshipDuration==="Long Term"&&sH&&(l.forbearancePeriodLt12||l.totalDLQLt12)&&l.borrowerIntentRetention&&oo,nodes:[...vN,node("Hardship=Long Term (active)",l.hardshipDuration,l.hardshipDuration==="Long Term"),node("Std hardship",l.hardshipType,sH),node("Forbearance/DLQ<12mo",l.forbearancePeriodLt12||l.totalDLQLt12,l.forbearancePeriodLt12||l.totalDLQLt12),node("Intent=Retain",l.borrowerIntentRetention,l.borrowerIntentRetention),node("Owner Occupied",l.occupancyStatus,oo)]});
   // 4a. Traditional Modification — negotiated terms, requires VA approval
-  results.push({option:"VA Traditional Modification",eligible:vb&&sH&&dlqD>=61&&l.borrowerConfirmedCannotAffordCurrent&&l.borrowerCanAffordModifiedPayment&&l.borrowerIntentRetention&&oo,nodes:[...vN,node("Std hardship",l.hardshipType,sH),node("DLQ≥61d",dlqD,dlqD>=61),node("Confirmed cannot afford current",l.borrowerConfirmedCannotAffordCurrent,l.borrowerConfirmedCannotAffordCurrent),node("CAN afford modified",l.borrowerCanAffordModifiedPayment,l.borrowerCanAffordModifiedPayment),node("Intent=Retain",l.borrowerIntentRetention,l.borrowerIntentRetention),node("Owner Occupied",l.occupancyStatus,oo)]});
-  // 4b. 30-Year Loan Modification — rate = PMMS, 360-month term
-  results.push({option:"VA 30-Year Loan Modification",eligible:vb&&sH&&dlqD>=61&&l.borrowerConfirmedCannotAffordCurrent&&!l.borrowerCanAffordCurrentMonthly&&l.borrowerIntentRetention&&oo,nodes:[...vN,node("Std hardship",l.hardshipType,sH),node("DLQ≥61d",dlqD,dlqD>=61),node("Confirmed cannot afford current",l.borrowerConfirmedCannotAffordCurrent,l.borrowerConfirmedCannotAffordCurrent),node("Cannot afford current monthly",!l.borrowerCanAffordCurrentMonthly,!l.borrowerCanAffordCurrentMonthly),node("Intent=Retain",l.borrowerIntentRetention,l.borrowerIntentRetention),node("Owner Occupied",l.occupancyStatus,oo)]});
+  results.push({option:"VA Traditional Modification",eligible:vb&&sH&&dlqD>=61&&l.borrowerConfirmedCannotAffordCurrent&&l.borrowerCanAffordModifiedPayment&&l.borrowerIntentRetention&&oo&&vaArrearsWithin25&&vaUPBWithinOrig,nodes:[...vN,node("Std hardship",l.hardshipType,sH),node("DLQ≥61d",dlqD,dlqD>=61),node("Confirmed cannot afford current",l.borrowerConfirmedCannotAffordCurrent,l.borrowerConfirmedCannotAffordCurrent),node("CAN afford modified",l.borrowerCanAffordModifiedPayment,l.borrowerCanAffordModifiedPayment),node("Intent=Retain",l.borrowerIntentRetention,l.borrowerIntentRetention),node("Owner Occupied",l.occupancyStatus,oo),node("Arrearages ≤25% of orig UPB",vaArrearsPct!=null?vaArrearsPct.toFixed(1)+"%":"N/A",vaArrearsWithin25),node("New UPB ≤ Orig UPB",vaUPBWithinOrig?"Yes":"No — exceeds cap",vaUPBWithinOrig)]});
+  // 4b. 30-Year Loan Modification — rate = PMMS rounded up to nearest 0.125%, 360-month term
+  results.push({option:"VA 30-Year Loan Modification",eligible:vb&&sH&&dlqD>=61&&l.borrowerConfirmedCannotAffordCurrent&&!l.borrowerCanAffordCurrentMonthly&&l.borrowerIntentRetention&&oo&&vaArrearsWithin25&&vaUPBWithinOrig,nodes:[...vN,node("Std hardship",l.hardshipType,sH),node("DLQ≥61d",dlqD,dlqD>=61),node("Confirmed cannot afford current",l.borrowerConfirmedCannotAffordCurrent,l.borrowerConfirmedCannotAffordCurrent),node("Cannot afford current monthly",!l.borrowerCanAffordCurrentMonthly,!l.borrowerCanAffordCurrentMonthly),node("Intent=Retain",l.borrowerIntentRetention,l.borrowerIntentRetention),node("Owner Occupied",l.occupancyStatus,oo),node("Arrearages ≤25% of orig UPB",vaArrearsPct!=null?vaArrearsPct.toFixed(1)+"%":"N/A",vaArrearsWithin25),node("New UPB ≤ Orig UPB",vaUPBWithinOrig?"Yes":"No — exceeds cap",vaUPBWithinOrig)]});
   // 4c. 40-Year Loan Modification — Circular 26-22-18; rate=PMMS, 480-month term
   //     NOTE: 10% P&I reduction requirement REMOVED by Circular 26-25-2 (effective May 1, 2025)
   results.push({option:"VA 40-Year Loan Modification",eligible:vb&&sH&&dlqD>=61&&l.borrowerConfirmedCannotAffordCurrent&&oo&&l.borrowerIntentRetention,nodes:[...vN,node("Std hardship",l.hardshipType,sH),node("DLQ≥61d",dlqD,dlqD>=61),node("Confirmed cannot afford",l.borrowerConfirmedCannotAffordCurrent,l.borrowerConfirmedCannotAffordCurrent),node("Owner Occupied",l.occupancyStatus,oo),node("Intent=Retain",l.borrowerIntentRetention,l.borrowerIntentRetention)]});
@@ -1531,11 +1661,13 @@ function evaluateFHLMC(l) {
   // ── 2. Payment Deferral ───────────────────────────────────────────────────────
   {
     const eligDlqRange = dlq >= 2 && dlq <= 6;
+    const eligLoanAge = loanAge >= 12;
     const nodes = [
+      node("Conventional 1st lien", l.lienPosition, isConventional && isFirstLien),
+      node("Loan age ≥ 12 months", loanAge+"mo", eligLoanAge),
       node("DLQ 2–6 months", dlq+"mo", eligDlqRange),
       node("Hardship resolved", l.fhlmcHardshipResolved?"Yes":"No", l.fhlmcHardshipResolved),
       node("Can resume full contractual payment", l.fhlmcCanResumeFull?"Yes":"No", l.fhlmcCanResumeFull),
-      node("Conventional 1st lien", l.lienPosition, isConventional && isFirstLien),
       node("No approved liquidation option active", l.fhlmcApprovedLiquidationOption?"Active":"None", noActiveLiquidation),
       node("No active/performing TPP", l.fhlmcActiveTPP?"Active":"None", noActiveTPP),
       node("No unexpired offer for another workout option", l.fhlmcUnexpiredOffer?"Yes":"No", noUnexpiredOffer),
@@ -1749,6 +1881,12 @@ function evaluateFNMA(l) {
     const eligLienPos = l.lienPosition === "First";
     const eligLoanAge = loanAge >= 12;
     const eligDLQ = dlq >= 2 || l.fnmaImminentDefault;
+    // Imminent default business rules (D2-3.2-06)
+    // Rule 1: Primary residence + long-term hardship + cash reserves < 3 months PITIA
+    const fnmaIDRule1 = l.fnmaPropertyType === "Principal Residence" && l.fnmaLongTermHardship && l.fnmaCashReservesLt3Mo;
+    // Rule 2: FICO ≤ 620 OR 2+ 30-day DLQ in past 12 months OR housing expense ratio > 55%
+    const fnmaIDRule2 = n(l.fnmaFICO) <= 620 || l.fnmaPrior30DLQ12Mo || n(l.fnmaHousingRatio) > 55;
+    const fnmaImminentValid = !l.fnmaImminentDefault || (fnmaIDRule1 && fnmaIDRule2);
     const eligPriorMods = priorModCount < 3;
     const eligNoFailedTPP = !l.fnmaFailedTPP12Months;
     const eligNoReDefault = !l.fnmaReDefaulted12Months;
@@ -1756,6 +1894,7 @@ function evaluateFNMA(l) {
       node("Conventional 1st lien", l.lienPosition, eligLienPos),
       node("Loan age ≥ 12 months", loanAge+"mo", eligLoanAge),
       node("≥ 60 days DLQ OR servicer imminent default determination", dlq+"mo"+(l.fnmaImminentDefault?" (imminent default)":""), eligDLQ),
+      ...(l.fnmaImminentDefault ? [node("Imminent default business rules met (Rule 1 + Rule 2)", fnmaImminentValid?"Pass":"Fail", fnmaImminentValid, "Rule 1: primary res + LT hardship + cash <3mo PITIA; Rule 2: FICO ≤620 or 2x30DLQ or DTI>55%")] : []),
       node("Prior modifications < 3 (payment deferrals excluded)", priorModCount, eligPriorMods),
       node("No failed Flex Mod TPP within 12 months", l.fnmaFailedTPP12Months?"Yes":"No", eligNoFailedTPP),
       node("No 60-day re-default within 12mo of last Flex Mod", l.fnmaReDefaulted12Months?"Yes":"No", eligNoReDefault),
@@ -2047,13 +2186,13 @@ function MainApp({profile,onSignOut}:{profile:Profile;onSignOut:()=>void}) {
                 <F label="Current Monthly PITI"><Num value={loan.currentPITI} onChange={v=>set("currentPITI",v)} placeholder="e.g. 1800" prefix="$"/></F>
                 <F label="Gross Monthly Income"><Num value={loan.grossMonthlyIncome} onChange={v=>set("grossMonthlyIncome",v)} placeholder="e.g. 5000" prefix="$"/></F>
                 <F label="Current Interest Rate (%)"><Num value={loan.currentInterestRate} onChange={v=>set("currentInterestRate",v)} placeholder="e.g. 6.5"/></F>
-                <F label="PMMS Rate (%)"><Num value={loan.pmmsRate} onChange={v=>set("pmmsRate",v)} placeholder="e.g. 7.1"/></F>
-                {gmi>0&&<div className="bg-emerald-50 rounded p-2 text-xs text-emerald-800 space-y-0.5 mt-1">
+                {loan.loanType !== "FHLMC" && <F label="PMMS Rate (%)"><Num value={loan.pmmsRate} onChange={v=>set("pmmsRate",v)} placeholder="e.g. 7.1"/></F>}
+                {gmi>0&&(loan.loanType === "FHA" || loan.loanType === "USDA")&&<div className="bg-emerald-50 rounded p-2 text-xs text-emerald-800 space-y-0.5 mt-1">
                   <div>31% GMI Target: <strong>${target31}/mo</strong></div>
                   <div>40% GMI Cap: <strong>${target40}/mo</strong></div>
                   {loan.currentPITI&&<div>PITI/GMI Ratio: <strong>{(n(loan.currentPITI)/gmi*100).toFixed(1)}%</strong></div>}
                 </div>}
-                <F label="Target Payment Override (optional — leave blank to use 31% GMI)"><Num value={loan.targetPayment} onChange={v=>set("targetPayment",v)} placeholder="Auto: 31% GMI" prefix="$"/></F>
+                {(loan.loanType === "FHA" || loan.loanType === "USDA") && <F label="Target Payment Override (optional — leave blank to use 31% GMI)"><Num value={loan.targetPayment} onChange={v=>set("targetPayment",v)} placeholder="Auto: 31% GMI" prefix="$"/></F>}
               </Sec>
               <Sec title="📐 Amounts to Capitalize / Defer">
                 <F label="Arrearages (past-due P&I + escrow advances — total for capitalization)"><Num value={loan.arrearagesToCapitalize} onChange={v=>set("arrearagesToCapitalize",v)} placeholder="e.g. 7200" prefix="$"/></F>
@@ -2063,15 +2202,15 @@ function MainApp({profile,onSignOut}:{profile:Profile;onSignOut:()=>void}) {
                 <F label="Projected Escrow Shortage (NOT capitalized — spread over 60 months)"><Num value={loan.escrowShortage} onChange={v=>set("escrowShortage",v)} placeholder="e.g. 800" prefix="$"/></F>
                 <F label="Legal / Foreclosure Fees (actually performed)"><Num value={loan.legalFees} onChange={v=>set("legalFees",v)} placeholder="e.g. 1200" prefix="$"/></F>
                 <F label="Late Fees (NOT capitalizable — for reference only)"><Num value={loan.lateFees} onChange={v=>set("lateFees",v)} placeholder="e.g. 300" prefix="$"/></F>
-                <F label="Prior Partial Claim / MRA Balance"><Num value={loan.priorPartialClaimBalance} onChange={v=>set("priorPartialClaimBalance",v)} placeholder="e.g. 15000" prefix="$"/></F>
-                {loan.loanType!=="USDA"&&<F label="Partial Claim % of Statutory Limit"><Num value={loan.partialClaimPct} onChange={v=>set("partialClaimPct",v)} placeholder="e.g. 20"/></F>}
+                {(loan.loanType === "FHA" || loan.loanType === "USDA" || loan.loanType === "VA") && <F label="Prior Partial Claim / MRA Balance"><Num value={loan.priorPartialClaimBalance} onChange={v=>set("priorPartialClaimBalance",v)} placeholder="e.g. 15000" prefix="$"/></F>}
+                {loan.loanType==="FHA"&&<F label="Partial Claim % of Statutory Limit"><Num value={loan.partialClaimPct} onChange={v=>set("partialClaimPct",v)} placeholder="e.g. 20"/></F>}
                 {n(loan.arrearagesToCapitalize)>0&&<div className="bg-green-50 rounded p-2 text-xs text-green-800 mt-1 space-y-0.5">
                   <div>Total Capitalizable (arrears + legal): <strong>{fmt$(n(loan.arrearagesToCapitalize)+n(loan.legalFees))}</strong></div>
                   {n(loan.escrowAdvanceBalance)>0&&<div>Est. Payment Deferral Total: <strong>{fmt$(n(loan.arrearagesToCapitalize)+n(loan.escrowAdvanceBalance)-n(loan.suspenseBalance))}</strong></div>}
                   {n(loan.suspenseBalance)>0&&<div className="text-emerald-700">Suspense offset: <strong>−{fmt$(n(loan.suspenseBalance))}</strong></div>}
                   <div className="text-red-600">Late fees excluded: <strong>{fmt$(n(loan.lateFees))}</strong></div>
-                  {n(loan.originalUpb)>0&&<div>30% PC Cap: <strong>{fmt$(n(loan.originalUpb)*0.30)}</strong></div>}
-                  {n(loan.originalUpb)>0&&<div>25% Arrearage Cap (VA): <strong>{fmt$(n(loan.originalUpb)*0.25)}</strong></div>}
+                  {n(loan.originalUpb)>0&&(loan.loanType === "FHA" || loan.loanType === "USDA" || loan.loanType === "VA")&&<div>30% PC Cap: <strong>{fmt$(n(loan.originalUpb)*0.30)}</strong></div>}
+                  {n(loan.originalUpb)>0&&loan.loanType === "VA"&&<div>25% Arrearage Cap (VA): <strong>{fmt$(n(loan.originalUpb)*0.25)}</strong></div>}
                 </div>}
               </Sec>
             </div>
@@ -2100,7 +2239,7 @@ function MainApp({profile,onSignOut}:{profile:Profile;onSignOut:()=>void}) {
               </Sec>
               <Sec title="🏠 Property & Occupancy">
                 <F label="Occupancy Status"><Sel value={loan.occupancyStatus} onChange={v=>set("occupancyStatus",v)} options={["Owner Occupied","Non-Owner Occupied","Vacant","Tenant Occupied"]}/></F>
-                <F label="Property Disposition"><Sel value={loan.propertyDisposition} onChange={v=>set("propertyDisposition",v)} options={["Principal Residence","Second Home","Investment"]}/></F>
+                {loan.loanType === "FHA" && <F label="Property Disposition"><Sel value={loan.propertyDisposition} onChange={v=>set("propertyDisposition",v)} options={["Principal Residence","Second Home","Investment"]}/></F>}
                 <F label="Property Condition"><Sel value={loan.propertyCondition} onChange={v=>set("propertyCondition",v)} options={["Standard","Condemned","Uninhabitable"]}/></F>
                 <F label="Lien Position"><Sel value={loan.lienPosition} onChange={v=>set("lienPosition",v)} options={["First","Second"]}/></F>
                 <Tog label="Foreclosure Active" value={loan.foreclosureActive} onChange={v=>set("foreclosureActive",v)}/>
@@ -2111,26 +2250,35 @@ function MainApp({profile,onSignOut}:{profile:Profile;onSignOut:()=>void}) {
                 <F label="Hardship Duration"><Sel value={loan.hardshipDuration} onChange={v=>set("hardshipDuration",v)} options={loan.loanType==="USDA"?["Short Term","Resolved","Long Term","Permanent"]:["Resolved","Long Term","Permanent"]}/></F>
                 <F label="Delinquency (months)"><Num value={loan.delinquencyMonths} onChange={v=>set("delinquencyMonths",v)} placeholder="e.g. 4"/></F>
                 <F label="Delinquency (days — override)"><Num value={loan.delinquencyDays} onChange={v=>set("delinquencyDays",v)} placeholder="e.g. 120"/></F>
-                <Tog label="Continuous Income (1+ borrowers)" value={loan.continuousIncome} onChange={v=>set("continuousIncome",v)}/>
-                <Tog label="Borrower Intent = Retention" value={loan.borrowerIntentRetention} onChange={v=>set("borrowerIntentRetention",v)}/>
+                {loan.loanType === "FHA" && <Tog label="Continuous Income (1+ borrowers)" value={loan.continuousIncome} onChange={v=>set("continuousIncome",v)}/>}
               </Sec>
             </div>
             {/* Col 3 - loan type specific */}
             <div className="bg-white rounded-2xl shadow-sm border border-slate-200 p-5 overflow-y-auto" style={{maxHeight:"82vh"}}>
               <Sec title="🔧 Modification Flags">
-                <Tog label="Can achieve target by re-amortizing 360 months" value={loan.canAchieveTargetByReamort} onChange={v=>set("canAchieveTargetByReamort",v)}/>
-                <Tog label="Current rate at/below market" value={loan.currentRateAtOrBelowMarket} onChange={v=>set("currentRateAtOrBelowMarket",v)}/>
-                <Tog label="Current PITI at/below target payment" value={loan.currentPITIAtOrBelowTarget} onChange={v=>set("currentPITIAtOrBelowTarget",v)}/>
-                <Tog label="Borrower confirmed cannot afford current payment" value={loan.borrowerConfirmedCannotAffordCurrent} onChange={v=>set("borrowerConfirmedCannotAffordCurrent",v)}/>
-                <Tog label="Borrower can afford modified payment" value={loan.borrowerCanAffordModifiedPayment} onChange={v=>set("borrowerCanAffordModifiedPayment",v)}/>
-                <Tog label="Borrower can afford reinstatement/repayment plan" value={loan.borrowerCanAffordReinstateOrRepay} onChange={v=>set("borrowerCanAffordReinstateOrRepay",v)}/>
-                <Tog label="Borrower can afford current monthly payment" value={loan.borrowerCanAffordCurrentMonthly} onChange={v=>set("borrowerCanAffordCurrentMonthly",v)}/>
+                <Tog label="Borrower Intent = Retention" value={loan.borrowerIntentRetention} onChange={v=>set("borrowerIntentRetention",v)}/>
                 {loan.loanType==="VA"&&<Tog label="Modified P&I ≤ 90% of old P&I" value={loan.modifiedPILe90PctOld} onChange={v=>set("modifiedPILe90PctOld",v)}/>}
               </Sec>
-              {loan.loanType==="FHA"&&(<>
+              {loan.loanType==="FHA"&&(()=>{
+                const _pmms=n(loan.pmmsRate), _esc=n(loan.currentEscrow), _gmi=n(loan.grossMonthlyIncome);
+                const _tgt=n(loan.targetPayment)||(_gmi>0?_gmi*0.31:0);
+                const _upb=n(loan.upb)+n(loan.arrearagesToCapitalize)+n(loan.escrowShortage)+n(loan.legalFees);
+                const _hasInputs=_pmms>0&&_tgt>0&&_upb>0;
+                const _pi360=_hasInputs?calcMonthlyPI(_upb,_pmms,360):null;
+                const _piti360=_pi360!=null?_pi360+_esc:null;
+                const _pi480=_hasInputs?calcMonthlyPI(_upb,_pmms,480):null;
+                const _piti480=_pi480!=null?_pi480+_esc:null;
+                const _can360=_piti360!=null?_piti360<=_tgt:loan.canAchieveTargetByReamort;
+                const _can480=_piti480!=null?_piti480<=_tgt:loan.canAchieveTargetBy480Reamort;
+                return (<>
                 <Sec title="FHA-HAMP">
                   <F label="Prior FHA-HAMP Agreement (months ago)"><Num value={loan.priorFHAHAMPMonths} onChange={v=>set("priorFHAHAMPMonths",v)} placeholder="0 = none"/></F>
-                  <Tog label="Can achieve 31% target via 480-month re-amortization (FHA 40-Year)" value={loan.canAchieveTargetBy480Reamort} onChange={v=>set("canAchieveTargetBy480Reamort",v)}/>
+                  {_hasInputs
+                    ? <div className="flex items-center justify-between py-1 text-xs"><span className="text-slate-600">Target achievable by 360mo re-amortization</span><span className={`font-semibold ${_can360?"text-emerald-600":"text-red-500"}`}>{_can360?"✅ Yes":"❌ No"} — auto (PITI ${fmt$(_piti360)} vs ${fmt$(_tgt)})</span></div>
+                    : <Tog label="Can achieve target by re-amortizing 360 months (manual — enter PMMS & GMI to auto-compute)" value={loan.canAchieveTargetByReamort} onChange={v=>set("canAchieveTargetByReamort",v)}/>}
+                  {_hasInputs
+                    ? <div className="flex items-center justify-between py-1 text-xs"><span className="text-slate-600">Target achievable by 480mo re-amortization (40-Year)</span><span className={`font-semibold ${_can480?"text-emerald-600":"text-red-500"}`}>{_can480?"✅ Yes":"❌ No"} — auto (PITI ${fmt$(_piti480)} vs ${fmt$(_tgt)})</span></div>
+                    : <Tog label="Can achieve 31% target via 480-month re-amortization (FHA 40-Year) (manual — enter PMMS & GMI to auto-compute)" value={loan.canAchieveTargetBy480Reamort} onChange={v=>set("canAchieveTargetBy480Reamort",v)}/>}
                   <Tog label="Arrears exceed 30% statutory limit" value={loan.arrearsExceed30PctLimit} onChange={v=>set("arrearsExceed30PctLimit",v)}/>
                   {loan.arrearsExceed30PctLimit&&<Tog label="Modified payment ≤ 40% GMI" value={loan.modPaymentLe40PctGMI} onChange={v=>set("modPaymentLe40PctGMI",v)}/>}
                   <Tog label="One+ borrowers unemployed" value={loan.unemployed} onChange={v=>set("unemployed",v)}/>
@@ -2157,7 +2305,7 @@ function MainApp({profile,onSignOut}:{profile:Profile;onSignOut:()=>void}) {
                     {loan.propertySubstantiallyDamaged&&<Tog label="Repairs completed" value={loan.repairsCompleted} onChange={v=>set("repairsCompleted",v)}/>}
                   </>)}
                 </Sec>
-              </>)}
+              </>);})()}
               {loan.loanType==="USDA"&&(<>
                 <Sec title="USDA – Streamline Mod">
                   <Tog label="UPB ≥ $5,000" value={loan.usdaUpbGe5000} onChange={v=>set("usdaUpbGe5000",v)}/>
@@ -2203,6 +2351,8 @@ function MainApp({profile,onSignOut}:{profile:Profile;onSignOut:()=>void}) {
               </>)}
               {loan.loanType==="VA"&&(<>
                 <Sec title="VA – Forbearance / Repayment">
+                  <Tog label="Borrower confirmed cannot afford current payment" value={loan.borrowerConfirmedCannotAffordCurrent} onChange={v=>set("borrowerConfirmedCannotAffordCurrent",v)}/>
+                  <Tog label="Borrower can afford current monthly payment" value={loan.borrowerCanAffordCurrentMonthly} onChange={v=>set("borrowerCanAffordCurrentMonthly",v)}/>
                   <Tog label="Forbearance period < 12 months" value={loan.forbearancePeriodLt12} onChange={v=>set("forbearancePeriodLt12",v)}/>
                   <Tog label="Total DLQ < 12 months" value={loan.totalDLQLt12} onChange={v=>set("totalDLQLt12",v)}/>
                   <Tog label="Calculated RPP Plans > 0" value={loan.calculatedRPPGt0} onChange={v=>set("calculatedRPPGt0",v)}/>
@@ -2225,14 +2375,43 @@ function MainApp({profile,onSignOut}:{profile:Profile;onSignOut:()=>void}) {
               </>)}
               {loan.loanType==="FNMA"&&(<>
                 <Sec title="FNMA – Loan Status">
+                  <F label="Mortgage Type"><Sel value={loan.fnmaMortgageType} onChange={v=>set("fnmaMortgageType",v)} options={["Fixed Rate","ARM"]}/></F>
+                  {loan.fnmaMortgageType === "ARM" && (<>
+                    <F label="Current Index Rate (%)"><Num value={loan.fnmaCurrentIndex} onChange={v=>set("fnmaCurrentIndex",v)} placeholder="e.g. 5.32 (SOFR)"/></F>
+                    <F label="Margin (%)"><Num value={loan.fnmaMargin} onChange={v=>set("fnmaMargin",v)} placeholder="e.g. 2.25"/></F>
+                    {n(loan.fnmaCurrentIndex) > 0 && n(loan.fnmaMargin) > 0 && <div className="bg-teal-50 rounded p-2 text-xs text-teal-800 mt-1">
+                      <div>Fully-Indexed Rate: <strong>{(Math.round((n(loan.fnmaCurrentIndex) + n(loan.fnmaMargin)) * 8) / 8).toFixed(4)}%</strong> (nearest 0.125%)</div>
+                      <div>Preliminary Rate (Step 1): <strong>{Math.min(n(loan.fnmaCurrentIndex) + n(loan.fnmaMargin), n(loan.currentInterestRate)).toFixed(4)}%</strong> (lower of note rate / fully-indexed)</div>
+                    </div>}
+                  </>)}
                   <F label="Loan Age (months since origination)"><Num value={loan.fnmaLoanAge} onChange={v=>set("fnmaLoanAge",v)} placeholder="e.g. 36"/></F>
+                  {n(loan.fnmaLoanAge) > 0 && n(loan.fnmaLoanAge) < 12 &&
+                    <div className="bg-amber-50 rounded p-2 text-xs text-amber-700 mt-1">⚠️ Loan age &lt; 12 months — ineligible for Payment Deferral and Flex Modification</div>
+                  }
                   <F label="Property Type"><Sel value={loan.fnmaPropertyType} onChange={v=>set("fnmaPropertyType",v)} options={["Principal Residence","Second Home","Investment"]}/></F>
                   <Tog label="Hardship resolved (temporary, no longer a problem)" value={loan.fnmaHardshipResolved} onChange={v=>set("fnmaHardshipResolved",v)}/>
                   <Tog label="Can resume full contractual monthly payment" value={loan.fnmaCanResumeFull} onChange={v=>set("fnmaCanResumeFull",v)}/>
                   <Tog label="Cannot reinstate or afford repayment plan" value={loan.fnmaCannotReinstate} onChange={v=>set("fnmaCannotReinstate",v)}/>
                   <Tog label="Servicer imminent default determination" value={loan.fnmaImminentDefault} onChange={v=>set("fnmaImminentDefault",v)}/>
                   <Tog label="Within 36 months of maturity or projected payoff" value={loan.fnmaWithin36MonthsMaturity} onChange={v=>set("fnmaWithin36MonthsMaturity",v)}/>
+                  <Tog label="QRPC (Qualified Right Party Contact) achieved" value={loan.fnmaQRPCAchieved} onChange={v=>set("fnmaQRPCAchieved",v)}/>
                 </Sec>
+                {loan.fnmaImminentDefault && (
+                  <Sec title="FNMA – Imminent Default Business Rules">
+                    <div className="bg-amber-50 rounded p-2 text-xs text-amber-700 mb-2">Required when servicer marks borrower as Imminent Default (current/&lt;60 DLQ)</div>
+                    <div className="text-[10px] font-bold uppercase tracking-widest text-slate-400 mb-1.5">Rule 1 (all required)</div>
+                    <div className="flex items-center justify-between gap-3 py-0.5"><span className="text-xs text-slate-600 flex-1 leading-snug">Primary Residence (from Property Type above)</span><span className={`text-xs font-bold px-2 py-0.5 rounded ${loan.fnmaPropertyType === "Principal Residence" ? "bg-emerald-100 text-emerald-700" : "bg-red-100 text-red-700"}`}>{loan.fnmaPropertyType === "Principal Residence" ? "✅ Yes" : "❌ No"}</span></div>
+                    <Tog label="Long-term or permanent hardship" value={loan.fnmaLongTermHardship} onChange={v=>set("fnmaLongTermHardship",v)}/>
+                    <Tog label="Cash reserves < 3 months PITIA" value={loan.fnmaCashReservesLt3Mo} onChange={v=>set("fnmaCashReservesLt3Mo",v)}/>
+                    <div className="text-[10px] font-bold uppercase tracking-widest text-slate-400 mb-1.5 mt-2">Rule 2 (any one required)</div>
+                    <F label="FICO Score (middle/lower method)"><Num value={loan.fnmaFICO} onChange={v=>set("fnmaFICO",v)} placeholder="e.g. 620"/></F>
+                    <Tog label="2+ 30-day DLQ in past 12 months" value={loan.fnmaPrior30DLQ12Mo} onChange={v=>set("fnmaPrior30DLQ12Mo",v)}/>
+                    <F label="Pre-Mod Housing Expense / GMI (%)"><Num value={loan.fnmaHousingRatio} onChange={v=>set("fnmaHousingRatio",v)} placeholder="e.g. 55"/></F>
+                    {(n(loan.fnmaFICO) > 0 || loan.fnmaPrior30DLQ12Mo || n(loan.fnmaHousingRatio) > 0) && <div className="bg-emerald-50 rounded p-2 text-xs text-emerald-800 mt-1">
+                      Rule 2: <strong>{n(loan.fnmaFICO) <= 620 && n(loan.fnmaFICO) > 0 ? "✅ FICO ≤ 620" : loan.fnmaPrior30DLQ12Mo ? "✅ 2x30 DLQ" : n(loan.fnmaHousingRatio) > 55 ? "✅ DTI > 55%" : "❌ No Rule 2 criteria met"}</strong>
+                    </div>}
+                  </Sec>
+                )}
                 <Sec title="FNMA – Prior Workout History">
                   <F label="Prior deferred balance (non-interest-bearing forbearance from prior deferrals — added to UPB for Flex Mod)"><Num value={loan.fnmaPriorDeferredUPB} onChange={v=>set("fnmaPriorDeferredUPB",v)} placeholder="0" prefix="$"/></F>
                   <F label="Months since last non-disaster payment deferral (0 = never)"><Num value={loan.fnmaPriorDeferralMonths} onChange={v=>set("fnmaPriorDeferralMonths",v)} placeholder="0 = never"/></F>
@@ -2261,14 +2440,23 @@ function MainApp({profile,onSignOut}:{profile:Profile;onSignOut:()=>void}) {
               {loan.loanType==="FHLMC"&&(<>
                 <Sec title="FHLMC – Loan Status">
                   <F label="Loan Age (months since origination)"><Num value={loan.fhlmcLoanAge} onChange={v=>set("fhlmcLoanAge",v)} placeholder="e.g. 36"/></F>
-                  <F label="Mortgage Type"><Sel value={loan.fhlmcMortgageType} onChange={v=>set("fhlmcMortgageType",v)} options={["Conventional","FHA","VA","RHS"]}/></F>
+                  <F label="Mortgage Program"><Sel value={loan.fhlmcMortgageType} onChange={v=>set("fhlmcMortgageType",v)} options={["Conventional","FHA","VA","RHS"]}/></F>
+                  <F label="Rate Type"><Sel value={loan.fhlmcRateType} onChange={v=>set("fhlmcRateType",v)} options={["Fixed Rate","ARM"]}/></F>
+                  {loan.fhlmcRateType === "ARM" && (<>
+                    <F label="Current Index Rate (%)"><Num value={loan.fhlmcCurrentIndex} onChange={v=>set("fhlmcCurrentIndex",v)} placeholder="e.g. 5.32 (SOFR)"/></F>
+                    <F label="Margin (%)"><Num value={loan.fhlmcMarginRate} onChange={v=>set("fhlmcMarginRate",v)} placeholder="e.g. 2.25"/></F>
+                    {n(loan.fhlmcCurrentIndex) > 0 && n(loan.fhlmcMarginRate) > 0 && <div className="bg-teal-50 rounded p-2 text-xs text-teal-800 mt-1">
+                      <div>Fully-Indexed Rate: <strong>{(Math.round((n(loan.fhlmcCurrentIndex) + n(loan.fhlmcMarginRate)) * 8) / 8).toFixed(4)}%</strong> (nearest 0.125%)</div>
+                      <div>Preliminary Rate (Step 2): <strong>{Math.min(n(loan.fhlmcCurrentIndex) + n(loan.fhlmcMarginRate), n(loan.currentInterestRate)).toFixed(4)}%</strong> (lower of note rate / fully-indexed)</div>
+                    </div>}
+                  </>)}
                   <F label="Property Type"><Sel value={loan.fhlmcPropertyType} onChange={v=>set("fhlmcPropertyType",v)} options={["Primary Residence","Second Home","Investment Property"]}/></F>
                   <F label="FM Posted Modification Rate (%)"><Num value={loan.fhlmcPostedModRate} onChange={v=>set("fhlmcPostedModRate",v)} placeholder="e.g. 6.5"/></F>
                   <F label="Estimated Property Value"><Num value={loan.fhlmcPropertyValue} onChange={v=>set("fhlmcPropertyValue",v)} placeholder="e.g. 300000" prefix="$"/></F>
                   {n(loan.fhlmcPropertyValue)>0&&n(loan.upb)>0&&<div className="bg-teal-50 rounded p-2 text-xs text-teal-800 space-y-0.5 mt-1">
                     <div>Current MTMLTV: <strong>{(n(loan.upb)/n(loan.fhlmcPropertyValue)*100).toFixed(1)}%</strong></div>
                     <div>Post-Cap MTMLTV: <strong>{((n(loan.upb)+n(loan.arrearagesToCapitalize)+n(loan.legalFees))/n(loan.fhlmcPropertyValue)*100).toFixed(1)}%</strong></div>
-                    <div className="text-slate-500">≥50% → rate relief eligible; &gt;50% → principal forbearance eligible</div>
+                    <div className="text-slate-500">≥80% → rate relief eligible (§9206.6); &gt;80% → principal forbearance eligible</div>
                   </div>}
                   <Tog label="Hardship resolved (temporary, no longer a problem)" value={loan.fhlmcHardshipResolved} onChange={v=>set("fhlmcHardshipResolved",v)}/>
                   <Tog label="Can resume full contractual monthly payment" value={loan.fhlmcCanResumeFull} onChange={v=>set("fhlmcCanResumeFull",v)}/>
