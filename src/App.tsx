@@ -105,6 +105,8 @@ const initLoan = {
   fhlmcCanResumeFull:false,
   fhlmcImminentDefault:false,
   fhlmcPriorDeferredUPB:"0",
+  fhlmcCumulativeDeferredMonths:"0",
+  fhlmcPriorDeferralMonths:"0",
   fhlmcLoanAge:"24",
   fhlmcMortgageType:"Conventional", // Conventional, FHA, VA, RHS
   fhlmcRateType:"Fixed Rate",       // "Fixed Rate" or "ARM"
@@ -242,6 +244,23 @@ function calcApprovalTerms(optionName, l) {
   const remainingPCAvailable = maxPCAmount != null ? Math.max(0, maxPCAmount - priorPC) : null;
 
   const opt = optionName;
+
+  // ── Reinstatement ──
+  if (opt === "FNMA Reinstatement" || opt === "FHLMC Reinstatement") {
+    const totalDue = arrears + legal + lateFees + accruedInterest;
+    const netDue = Math.max(0, totalDue - suspense);
+    return {
+      "Reinstatement Amount (Est.)": fmt$(netDue),
+      "  → Past-Due Arrearages": fmt$(arrears),
+      "  → Legal / Foreclosure Fees": legal > 0 ? fmt$(legal) : "None",
+      "  → Late Fees": lateFees > 0 ? fmt$(lateFees) : "None",
+      "  → Accrued Interest": accruedInterest > 0 ? fmt$(accruedInterest) : "None",
+      "  → Suspense Offset": suspense > 0 ? fmt$(suspense) : "None",
+      "Effect on Loan": "Loan returned to current status — no change to rate, term, or payment",
+      "Deadline": "Any time prior to foreclosure sale",
+      "Post-Reinstatement": "Borrower retains original loan terms",
+    };
+  }
 
   // ── FHA Disaster Loan Modification ──
   if (opt === "FHA Disaster Loan Modification") {
@@ -1035,7 +1054,7 @@ function calcApprovalTerms(optionName, l) {
       "  → Escrow Advances (servicer third-party)": escrowAdv > 0 ? fmt$(escrowAdv) : "$0.00 — enter escrow advance balance if applicable",
       "  → Suspense / Unapplied Funds": suspense > 0 ? `${fmt$(suspense)} offset → net ${estNetForbearance != null ? fmt$(estNetForbearance) : "N/A"}` : "$0.00",
       "  → Escrow Shortage": escShortage > 0 ? `${fmt$(escShortage)} — NOT deferred; spread over escrow analysis` : "None",
-      "Cumulative Cap (Non-Disaster)": "Lifetime cap of 12 months deferred (non-disaster); prior non-disaster deferral must be ≥ 12 months ago",
+      "Cumulative Cap (Non-Disaster)": `18-month lifetime cap (non-disaster); ${n(l.fhlmcCumulativeDeferredMonths)}mo used + ${Math.min(dlqMonths, 6)}mo this deferral = ${n(l.fhlmcCumulativeDeferredMonths) + Math.min(dlqMonths, 6)}mo total; prior non-disaster deferral must be ≥ 12 months ago`,
       "Interest on Deferred Balance": "None — non-interest-bearing",
       "Deferred Balance Due": "At maturity, sale/transfer, refinance, or payoff",
       "First Payment After Deferral": "Full contractual monthly payment",
@@ -1287,7 +1306,7 @@ function calcApprovalTerms(optionName, l) {
     const currentPI_val = n(l.currentPI);
     const deferMonths = Math.min(n(l.delinquencyMonths), 6);
     const cumUsed = n(l.fnmaCumulativeDeferredMonths);
-    const cumRemaining = Math.max(0, 12 - cumUsed);
+    const cumRemaining = Math.max(0, 18 - cumUsed);
     const effectiveDeferMonths = Math.min(deferMonths, cumRemaining);
     // Estimated total P&I forbearance = delinquent months × P&I (SMDU approach)
     const estPIForbearance = currentPI_val > 0 ? effectiveDeferMonths * currentPI_val : null;
@@ -1320,7 +1339,7 @@ function calcApprovalTerms(optionName, l) {
       "  → Escrow Shortage": escShortage > 0 ? `${fmt$(escShortage)} — repaid over 60-month escrow analysis (NOT deferred)` : "None",
       "Post-Workout UPB (Est.)": hasPI ? fmt$(estPostWorkoutUPB) : "Enter P&I and rate",
       "P&I Payment After Deferral": currentPI_val > 0 ? `${fmt$(currentPI_val)} — UNCHANGED (no modification to rate, term, or payment)` : "Full contractual monthly payment — no change",
-      "Cumulative Cap": `${cumUsed} months used → ${cumulativeAfter} after this deferral / 12-month lifetime cap (disaster deferrals excluded)`,
+      "Cumulative Cap": `${cumUsed} months used → ${cumulativeAfter} after this deferral / 18-month lifetime cap (disaster deferrals excluded)`,
       "Interest on Deferred Balance": "None — non-interest-bearing balance",
       "Deferred Balance Due": "At maturity, sale/transfer, refinance, or payoff of interest-bearing UPB",
       "Late Charges": "All waived upon completion",
@@ -1650,6 +1669,14 @@ function evaluateFHLMC(l) {
   // Soft ineligibility (exception path exists)
   const softIneligible = priorMods >= 3 || l.fhlmcFailedFlexTPP12Mo || l.fhlmcPriorFlexMod60DLQ;
 
+  // ── 0. Reinstatement ─────────────────────────────────────────────────────────
+  {
+    const hasArrears = n(l.arrearagesToCapitalize) > 0 || dlq > 0;
+    const nodes = [
+      node("Past-due amounts exist", dlq+"mo DLQ", hasArrears),
+    ];
+    results.push({ option:"FHLMC Reinstatement", eligible:hasArrears, nodes, note:"Borrower pays all past-due amounts to restore current status — §9202" });
+  }
   // ── 1. Repayment Plan ─────────────────────────────────────────────────────────
   {
     const nodes = [
@@ -1662,12 +1689,18 @@ function evaluateFHLMC(l) {
   {
     const eligDlqRange = dlq >= 2 && dlq <= 6;
     const eligLoanAge = loanAge >= 12;
+    const fhlmcCumDeferred = n(l.fhlmcCumulativeDeferredMonths);
+    const fhlmcPriorDeferral = n(l.fhlmcPriorDeferralMonths);
+    const eligCumCap = fhlmcCumDeferred < 18;
+    const eligPriorDeferral = fhlmcPriorDeferral === 0 || fhlmcPriorDeferral >= 12;
     const nodes = [
       node("Conventional 1st lien", l.lienPosition, isConventional && isFirstLien),
       node("Loan age ≥ 12 months", loanAge+"mo", eligLoanAge),
       node("DLQ 2–6 months", dlq+"mo", eligDlqRange),
       node("Hardship resolved", l.fhlmcHardshipResolved?"Yes":"No", l.fhlmcHardshipResolved),
       node("Can resume full contractual payment", l.fhlmcCanResumeFull?"Yes":"No", l.fhlmcCanResumeFull),
+      node("Cumulative deferred months < 18 (lifetime, non-disaster)", fhlmcCumDeferred+"mo", eligCumCap),
+      node("Prior non-disaster deferral ≥ 12 months ago (or never)", fhlmcPriorDeferral===0?"None":fhlmcPriorDeferral+"mo ago", eligPriorDeferral),
       node("No approved liquidation option active", l.fhlmcApprovedLiquidationOption?"Active":"None", noActiveLiquidation),
       node("No active/performing TPP", l.fhlmcActiveTPP?"Active":"None", noActiveTPP),
       node("No unexpired offer for another workout option", l.fhlmcUnexpiredOffer?"Yes":"No", noUnexpiredOffer),
@@ -1692,19 +1725,21 @@ function evaluateFHLMC(l) {
     ];
     results.push({ option:"FHLMC Disaster Payment Deferral", eligible:nodes.every(nd=>nd.pass), nodes });
   }
-  // ── 4. Forbearance Plan (Unemployment) ───────────────────────────────────────
+  // ── 4. Forbearance Plan (§9203.3) ────────────────────────────────────────────
   {
-    const eligUnemployed = l.fhlmcUnemployed || l.hardshipType === "Unemployment";
+    const isUnemployed = l.fhlmcUnemployed || l.hardshipType === "Unemployment";
+    const isTemporary = !l.fhlmcLongTermHardship; // short-term / not permanent
+    const eligForbearance = isUnemployed || isTemporary;
     const nodes = [
-      node("Unemployed borrower (temporary hardship)", eligUnemployed?"Yes":"No", eligUnemployed),
+      node("Temporary hardship or unemployment", eligForbearance ? (isUnemployed ? "Unemployment" : "Temporary hardship") : "Long-term/permanent — use Flex Mod", eligForbearance),
       node("Property not condemned/abandoned", l.propertyCondition, propertyOK),
       node("No approved liquidation option active", l.fhlmcApprovedLiquidationOption?"Active":"None", noActiveLiquidation),
     ];
-    results.push({ option:"FHLMC Forbearance Plan", eligible:nodes.every(nd=>nd.pass), nodes, note:"Freddie Mac requires forbearance (not Flex Mod) for unemployed borrowers — §9203.3" });
+    results.push({ option:"FHLMC Forbearance Plan", eligible:nodes.every(nd=>nd.pass), nodes, note:isUnemployed?"⚠️ Unemployment: servicer MUST offer forbearance before Flex Mod (§9203.3)":"Available for any temporary hardship — §9203.3" });
   }
   // ── 5a. Freddie Mac Flex Modification — Standard (Full BRP) ──────────────────
   {
-    const eligHardship = l.fhlmcLongTermHardship && !l.fhlmcUnemployed;
+    const eligHardship = l.fhlmcLongTermHardship; // unemployment OK if forbearance completed or not appropriate
     const eligDLQ = dlq >= 2 || l.fhlmcImminentDefault;
     const eligLoanAge = loanAge >= 12;
     // Imminent default: Rule 1 always required; then Rule 2 OR Rule 3
@@ -1718,7 +1753,7 @@ function evaluateFHLMC(l) {
       node("Loan age ≥ 12 months", loanAge+"mo", eligLoanAge),
       node("≥ 60 days DLQ OR imminent default determination", dlq+"mo"+(l.fhlmcImminentDefault?" (ID)":""), eligDLQ),
       ...(l.fhlmcImminentDefault ? [node("Imminent default business rules met (Rule 1 + Rule 2/3)", imminentValid?"Pass":"Fail", imminentValid, "Rule 1: primary res + cash <$25k + LT hardship; Rule 2: FICO ≤620 or 2x30DLQ or DTI>40%")] : []),
-      node("Long-term/permanent hardship (not unemployment)", l.fhlmcLongTermHardship?"Yes":"No", eligHardship),
+      node("Long-term/permanent hardship (unemployment OK post-forbearance)", l.fhlmcLongTermHardship?"Yes":"No", eligHardship),
       node("Verified income", l.fhlmcVerifiedIncome?"Yes":"No", l.fhlmcVerifiedIncome),
       node("Investment property: current/<60 DLQ hard stop", l.fhlmcPropertyType, !investmentHardStop),
       node("Prior modifications < 3", priorMods, priorMods < 3),
@@ -1807,6 +1842,14 @@ function evaluateFNMA(l) {
     node("No pending workout option offer", l.fnmaActivePendingOffer?"Pending":"None", !l.fnmaActivePendingOffer),
     node("No active/performing modification TPP", l.fnmaActiveTPP?"Active":"None", !l.fnmaActiveTPP),
   ];
+  // ── 0. Reinstatement ─────────────────────────────────────────────────────────
+  {
+    const hasArrears = n(l.arrearagesToCapitalize) > 0 || dlq > 0;
+    const nodes = [
+      node("Past-due amounts exist", dlq+"mo DLQ", hasArrears),
+    ];
+    results.push({ option:"FNMA Reinstatement", eligible:hasArrears, nodes, note:"Borrower pays all past-due P&I, escrow, fees, and charges to restore current status" });
+  }
   // ── 1. Forbearance Plan (D2-3.2-01) ──────────────────────────────────────────
   {
     const isPrincipalRes = l.fnmaPropertyType === "Principal Residence";
@@ -1832,7 +1875,7 @@ function evaluateFNMA(l) {
     const eligLienPos = l.lienPosition === "First";
     const eligLoanAge = loanAge >= 12;
     const eligDlqRange = dlq >= 2 && dlq <= 6;
-    const eligCumCap = cumulativeDeferred < 12;
+    const eligCumCap = cumulativeDeferred < 18;
     const eligPriorDeferral = priorDeferralMonths === 0 || priorDeferralMonths >= 12;
     const eligNotNearMaturity = !l.fnmaWithin36MonthsMaturity;
     const eligNoFailedTPP = !l.fnmaFailedTPP12Months;
@@ -1844,7 +1887,7 @@ function evaluateFNMA(l) {
       node("Hardship resolved OR servicer imminent default determination", l.fnmaHardshipResolved?"Resolved":l.fnmaImminentDefault?"Imminent Default":"Neither", eligHardship),
       node("Can resume full contractual payment", l.fnmaCanResumeFull?"Yes":"No", l.fnmaCanResumeFull),
       node("Cannot reinstate or afford repayment plan", l.fnmaCannotReinstate?"Yes":"No", l.fnmaCannotReinstate),
-      node("Cumulative deferred months < 12 (lifetime)", cumulativeDeferred+"mo", eligCumCap),
+      node("Cumulative deferred months < 18 (lifetime)", cumulativeDeferred+"mo", eligCumCap),
       node("Prior non-disaster deferral ≥ 12 months ago (or never)", priorDeferralMonths===0?"None":priorDeferralMonths+"mo ago", eligPriorDeferral),
       node("Not within 36 months of maturity", l.fnmaWithin36MonthsMaturity?"Within 36mo":"OK", eligNotNearMaturity),
       node("No failed Flex Mod TPP within 12 months", l.fnmaFailedTPP12Months?"Yes":"No", eligNoFailedTPP),
@@ -2494,6 +2537,8 @@ function MainApp({profile,onSignOut}:{profile:Profile;onSignOut:()=>void}) {
                 </Sec>
                 <Sec title="FHLMC – Prior Workout History">
                   <F label="Prior deferred balance (non-interest-bearing forbearance from prior deferrals — added to UPB for Flex Mod)"><Num value={loan.fhlmcPriorDeferredUPB} onChange={v=>set("fhlmcPriorDeferredUPB",v)} placeholder="0" prefix="$"/></F>
+                  <F label="Cumulative months deferred (lifetime total, prior to this evaluation)"><Num value={loan.fhlmcCumulativeDeferredMonths} onChange={v=>set("fhlmcCumulativeDeferredMonths",v)} placeholder="0"/></F>
+                  <F label="Months since last non-disaster payment deferral (0 = never)"><Num value={loan.fhlmcPriorDeferralMonths} onChange={v=>set("fhlmcPriorDeferralMonths",v)} placeholder="0 = never"/></F>
                   <F label="Prior modifications (count)"><Num value={loan.fhlmcPriorModCount} onChange={v=>set("fhlmcPriorModCount",v)} placeholder="0"/></F>
                   <Tog label="Failed Flex Mod TPP within 12 months" value={loan.fhlmcFailedFlexTPP12Mo} onChange={v=>set("fhlmcFailedFlexTPP12Mo",v)}/>
                   <Tog label="Prior Flex Mod → 60+ DLQ within 12mo, not cured" value={loan.fhlmcPriorFlexMod60DLQ} onChange={v=>set("fhlmcPriorFlexMod60DLQ",v)}/>
