@@ -49,6 +49,8 @@ const initLoan = {
   canAchieveTargetBy480Reamort:false,
   requestedForbearance:false, verifiedUnemployment:false,
   ineligibleAllRetention:false, propertyListedForSale:false, assumptionInProcess:false,
+  fhaBorrowerCanResumePreHardship:false, fhaHardshipResolved:false,
+  fhaCumulativeDeferredMonths:"0", fhaPriorDeferralMonths:"0",
   // USDA
   usdaUpbGe5000:true, usdaPaymentsMade12:true, usdaBankruptcyNotActive:true,
   usdaLitigationNotActive:true, usdaPriorFailedStreamlineTPP:false,
@@ -309,12 +311,17 @@ function calcApprovalTerms(optionName, l) {
     };
   }
 
-  // ── FHA-HAMP Standalone Loan Modification ──
-  if (opt === "FHA-HAMP Standalone Loan Modification") {
+  // ── FHA 30-Year Standalone Modification (ML 2025-06) ──
+  if (opt === "FHA 30-Year Standalone Modification") {
+    const fhaModRate = pmms > 0 ? Math.round((pmms + 0.25) / 0.125) * 0.125 : 0;
+    const currentPI_calc = n(l.currentPI);
+    const target25pct = currentPI_calc > 0 ? (currentPI_calc * 0.75) + currentEscrow : 0;
+    const fhaTarget = n(l.targetPayment) || target25pct || target;
     const newMat = mat360FromMod;
-    const newPI = pmms > 0 && newUPB > 0 ? calcMonthlyPI(newUPB, pmms, 360) : null;
+    const newPI = fhaModRate > 0 && newUPB > 0 ? calcMonthlyPI(newUPB, fhaModRate, 360) : null;
     const newPITI = newPI != null ? newPI + currentEscrow : null;
-    const targetMet = target > 0 && newPITI != null ? newPITI <= target : null;
+    const piReduction = currentPI_calc > 0 && newPI != null ? ((currentPI_calc - newPI) / currentPI_calc * 100).toFixed(1) : null;
+    const targetMet = fhaTarget > 0 && newPITI != null ? newPITI <= fhaTarget : null;
     return {
       "Modified Loan Amount (New UPB)": fmt$(newUPB),
       "Capitalized Amount": fmt$(capAmount),
@@ -322,22 +329,24 @@ function calcApprovalTerms(optionName, l) {
       "  → Escrow Shortage": fmt$(escShortage),
       "  → Legal / Foreclosure Fees": fmt$(legal),
       "  → Late Fees (EXCLUDED)": lateFees > 0 ? `${fmt$(lateFees)} — NOT capitalized` : "None",
-      "New Interest Rate": pmms > 0 ? fmtPct(pmms)+" (PMMS)" : "Enter PMMS rate",
+      "New Interest Rate": fhaModRate > 0 ? fmtPct(fhaModRate)+` (PMMS ${fmtPct(pmms)} + 25bps, rounded to nearest 0.125%)` : "Enter PMMS rate",
       "New Loan Term": "360 months (30 years)",
       "New Monthly P&I": fmt$(newPI),
       "New Monthly Escrow": fmt$(currentEscrow || null),
       "New Monthly PITI": fmt$(newPITI),
-      "Target Payment (31% GMI)": gmi > 0 ? fmt$(gmi*0.31) : "Enter GMI",
-      "Target Payment Met?": targetMet == null ? "Enter PMMS rate & GMI" : targetMet ? "✅ Yes" : "❌ No — consider Combo Mod+PC",
+      "P&I Reduction": piReduction != null ? `${piReduction}% (${fmt$(currentPI_calc)} → ${fmt$(newPI)})` : "Enter current P&I",
+      "Target (25% P&I Reduction)": currentPI_calc > 0 ? `${fmt$(currentPI_calc * 0.75)} P&I + ${fmt$(currentEscrow)} escrow = ${fmt$(target25pct)} PITI` : "Enter current P&I",
+      "Target Met?": targetMet == null ? "Enter PMMS rate & current P&I" : targetMet ? "✅ Yes — 25% reduction achieved" : "❌ No — consider 40-Year Combo Mod+PC",
       "New Maturity Date": fmtDate(newMat),
       "New First Payment Date": fmtDate(newFirstPmt),
       "Trial Payment Plan": "3-month TPP at new PITI amount",
-      "Approval Notification": "2-day mail with enclosed 2-day return envelope",
+      "No Financial Documentation Required": "ML 2025-06 — streamlined review",
+      "Authority": "HUD ML 2025-06 / ML 2025-12 — effective October 1, 2025",
     };
   }
 
-  // ── FHA-HAMP Standalone Partial Claim ──
-  if (opt === "FHA-HAMP Standalone Partial Claim") {
+  // ── FHA Standalone Partial Claim (ML 2025-06, step 3) ──
+  if (opt === "FHA Standalone Partial Claim") {
     const pcAmount = Math.min(capAmount, remainingPCAvailable || capAmount);
     return {
       "Partial Claim Amount": fmt$(pcAmount),
@@ -348,38 +357,67 @@ function calcApprovalTerms(optionName, l) {
       "Prior Partial Claim Balance": fmt$(priorPC),
       "30% Statutory Cap": maxPCAmount != null ? fmt$(maxPCAmount) : "Enter Original UPB",
       "Remaining PC Available": remainingPCAvailable != null ? fmt$(remainingPCAvailable) : "Enter Original UPB",
-      "First Mortgage Rate": "UNCHANGED — "+fmtPct(currentRate || null)+" (at or below market — required)",
+      "First Mortgage Rate": "UNCHANGED — "+fmtPct(currentRate || null),
       "First Mortgage Term": "UNCHANGED",
-      "First Mortgage Maturity": "UNCHANGED",
-      "First Mortgage PITI": "UNCHANGED (already at or below target payment — required)",
+      "First Mortgage Payment": "UNCHANGED — borrower resumes pre-hardship payment",
       "PC Lien Type": "Non-interest bearing subordinate lien",
       "PC Payoff Trigger": "Due upon sale, refinance, or payoff of first mortgage",
       "Trial Payment Plan": "Not required for Standalone PC",
-      "Approval Notification": "2-day mail with enclosed 2-day return envelope",
+      "No Financial Documentation Required": "ML 2025-06 — streamlined review",
+      "Authority": "HUD ML 2025-06 / ML 2025-12 — effective October 1, 2025",
     };
   }
 
-  // ── FHA-HAMP Combo Mod + PC ──
-  if (opt === "FHA-HAMP Combo Loan Modification & Partial Claim") {
-    // Per HUD 4000.1 III.A.2.k.ii.C:
-    // Step 1: Capitalize ALL permissible costs into new UPB (same as standalone mod)
-    const fullNewUPB = upb + capAmount; // arrears + escrow shortage + legal fees
-    // Step 2: Calculate PC as principal deferral needed to bring PITI to 31% target
-    const monthlyRate = pmms > 0 ? pmms / 100 / 12 : 0;
-    const targetPI = target > 0 && currentEscrow >= 0 ? target - currentEscrow : null;
+  // ── FHA Payment Deferral (ML 2025-06, step 4) ──
+  if (opt === "FHA Payment Deferral") {
+    const currentPITI_calc = n(l.currentPITI);
+    const deferMonths = Math.min(Math.max(2, n(l.delinquencyMonths)), 6);
+    const cumUsed = n(l.fhaCumulativeDeferredMonths);
+    const cumRemaining = Math.max(0, 12 - cumUsed);
+    const effectiveDefer = Math.min(deferMonths, cumRemaining);
+    const estPIDeferred = n(l.currentPI) > 0 ? effectiveDefer * n(l.currentPI) : null;
+    const cumulativeAfter = cumUsed + effectiveDefer;
+    return {
+      "Deferred Amount (Est.)": estPIDeferred != null ? fmt$(estPIDeferred) : "Enter current P&I",
+      "  → Months Deferred": `${effectiveDefer} months (DLQ: ${n(l.delinquencyMonths)}mo; cap remaining: ${cumRemaining}mo)`,
+      "  → Escrow Shortage": n(l.escrowShortage) > 0 ? `${fmt$(n(l.escrowShortage))} — NOT deferred; resolved separately` : "None",
+      "Cumulative FHA Deferral Cap": `${cumUsed}mo used → ${cumulativeAfter}mo after this deferral / 12-month lifetime cap`,
+      "Deferral Per Event": "2–6 months",
+      "Spacing Requirement": "≥12 months between FHA deferral events",
+      "First Mortgage Rate": "UNCHANGED — "+fmtPct(currentRate || null),
+      "First Mortgage Term": "UNCHANGED",
+      "Payment After Deferral": currentPITI_calc > 0 ? fmt$(currentPITI_calc)+" — full contractual payment resumes" : "Full contractual payment — no change",
+      "Interest on Deferred Balance": "None — non-interest-bearing",
+      "Deferred Balance Due": "At maturity, sale, refinance, or payoff",
+      "No Financial Documentation Required": "ML 2025-06 — streamlined review",
+      "Authority": "HUD ML 2025-06 / ML 2025-12 — effective October 1, 2025",
+    };
+  }
+
+  // ── FHA 40-Year Combination Modification + Partial Claim (ML 2025-06, step 6) ──
+  if (opt === "FHA 40-Year Combination Modification + Partial Claim") {
+    const fhaModRate = pmms > 0 ? Math.round((pmms + 0.25) / 0.125) * 0.125 : 0;
+    const currentPI_calc = n(l.currentPI);
+    const target25pct = currentPI_calc > 0 ? (currentPI_calc * 0.75) + currentEscrow : 0;
+    const fhaTarget = n(l.targetPayment) || target25pct || target;
+    // Step 1: Capitalize all permissible costs
+    const fullNewUPB = upb + capAmount;
+    // Step 2: PC deferral to close gap — residual amortized 360 months at mod rate
+    const monthlyRate = fhaModRate > 0 ? fhaModRate / 100 / 12 : 0;
+    const targetPI = fhaTarget > 0 && currentEscrow >= 0 ? fhaTarget - currentEscrow : null;
     const targetUPB = targetPI != null && targetPI > 0 && monthlyRate > 0
-      ? targetPI * ((1 - Math.pow(1 + monthlyRate, -360)) / monthlyRate)
-      : null;
+      ? targetPI * ((1 - Math.pow(1 + monthlyRate, -360)) / monthlyRate) : null;
     const pcDeferral = targetUPB != null ? Math.max(0, fullNewUPB - targetUPB) : 0;
     const pcTotal = remainingPCAvailable != null ? Math.min(pcDeferral, remainingPCAvailable) : pcDeferral;
-    const pcPctOfOrigUpb = originalUpb > 0 ? (( priorPC + pcTotal) / originalUpb * 100).toFixed(1) : null;
+    const pcPctOfOrigUpb = originalUpb > 0 ? ((priorPC + pcTotal) / originalUpb * 100).toFixed(1) : null;
     const pcWithinCap = maxPCAmount != null ? (priorPC + pcTotal) <= maxPCAmount : null;
-    // Step 3: Final modified UPB = full new UPB minus PC deferral
+    // Step 3: Final modified UPB over 480 months at mod rate
     const finalModUPB = fullNewUPB - pcTotal;
-    const newPI = pmms > 0 && finalModUPB > 0 ? calcMonthlyPI(finalModUPB, pmms, 360) : null;
+    const newMat480 = newFirstPmt ? addMonths(newFirstPmt, 480) : null;
+    const newPI = fhaModRate > 0 && finalModUPB > 0 ? calcMonthlyPI(finalModUPB, fhaModRate, 480) : null;
     const newPITI = newPI != null ? newPI + currentEscrow : null;
-    const targetMet = target > 0 && newPITI != null ? newPITI <= target : null;
-    const pctOfGMI = gmi > 0 && newPITI != null ? (newPITI/gmi*100).toFixed(1) : null;
+    const piReduction = currentPI_calc > 0 && newPI != null ? ((currentPI_calc - newPI) / currentPI_calc * 100).toFixed(1) : null;
+    const targetMet = fhaTarget > 0 && newPITI != null ? newPITI <= fhaTarget : null;
     return {
       "── Step 1: Capitalize All Permissible Costs ──": "——",
       "Full New UPB (pre-deferral)": fmt$(fullNewUPB),
@@ -388,8 +426,8 @@ function calcApprovalTerms(optionName, l) {
       "  → Legal / Foreclosure Fees": fmt$(legal),
       "  → Late Fees (EXCLUDED)": lateFees > 0 ? `${fmt$(lateFees)} — NOT capitalized` : "None",
       "── Step 2: Partial Claim (Principal Deferral) ──": "——",
-      "Target Monthly P&I (31% GMI minus Escrow)": targetPI != null && targetPI > 0 ? fmt$(targetPI) : "Enter GMI & Escrow",
-      "Target UPB to Achieve Affordability": targetUPB != null ? fmt$(targetUPB) : "Enter PMMS rate & GMI",
+      "Target (25% P&I Reduction)": currentPI_calc > 0 ? `${fmt$(currentPI_calc * 0.75)} P&I → target PITI ${fmt$(fhaTarget)}` : fhaTarget > 0 ? `Manual target: ${fmt$(fhaTarget)}` : "Enter current P&I",
+      "Target UPB to Achieve Affordability (360mo)": targetUPB != null ? fmt$(targetUPB) : "Enter PMMS rate & current P&I",
       "Principal Deferral Required": pcDeferral > 0 ? fmt$(pcDeferral) : "$0.00 — UPB already at or below target",
       "Prior Partial Claim Balance": fmt$(priorPC),
       "30% Statutory Cap (30% of Orig. UPB)": maxPCAmount != null ? fmt$(maxPCAmount) : "Enter Original UPB",
@@ -399,20 +437,20 @@ function calcApprovalTerms(optionName, l) {
       "PC Within 30% Cap?": pcWithinCap == null ? "Enter Original UPB" : pcWithinCap ? `✅ Yes — ${pcPctOfOrigUpb}% ≤ 30%` : `❌ No — ${pcPctOfOrigUpb}% exceeds 30% cap`,
       "── Step 3: Final Modified Loan Terms ──": "——",
       "Final Modified Loan Amount (New UPB)": fmt$(finalModUPB),
-      "New Interest Rate": pmms > 0 ? fmtPct(pmms)+" (PMMS)" : "Enter PMMS rate",
-      "New Loan Term": "360 months (30 years)",
+      "New Interest Rate": fhaModRate > 0 ? fmtPct(fhaModRate)+` (PMMS ${fmtPct(pmms)} + 25bps, rounded to nearest 0.125%)` : "Enter PMMS rate",
+      "New Loan Term": "480 months (40 years)",
       "New Monthly P&I": fmt$(newPI),
       "New Monthly Escrow": fmt$(currentEscrow || null),
       "New Monthly PITI": fmt$(newPITI),
-      "New PITI as % of GMI": pctOfGMI ? pctOfGMI+"%" : "Enter GMI",
-      "Target Payment (31% GMI)": gmi > 0 ? fmt$(gmi*0.31) : "Enter GMI",
-      "Target Payment Met?": targetMet == null ? "Enter inputs" : targetMet ? "✅ Yes" : "❌ No — PC cap insufficient to reach target",
-      "New Maturity Date": fmtDate(mat360FromMod),
+      "P&I Reduction": piReduction != null ? `${piReduction}% (${fmt$(currentPI_calc)} → ${fmt$(newPI)})` : "Enter current P&I",
+      "Target Met?": targetMet == null ? "Enter inputs" : targetMet ? "✅ Yes — 25% reduction achieved" : "❌ No — PC cap insufficient to reach target",
+      "New Maturity Date": fmtDate(newMat480),
       "New First Payment Date": fmtDate(newFirstPmt),
       "PC Lien Type": "Non-interest bearing subordinate lien",
       "PC Payoff Trigger": "Due upon sale, refinance, or payoff of first mortgage",
-      "Trial Payment Plan": "3-month TPP at new PITI amount",
-      "Approval Notification": "2-day mail with enclosed 2-day return envelope",
+      "Trial Payment Plan": "3-month TPP at new PITI (4 months if imminent default; 6 months if successor-in-interest)",
+      "No Financial Documentation Required": "ML 2025-06 — streamlined review",
+      "Authority": "HUD ML 2025-06 / ML 2025-12 — effective October 1, 2025",
     };
   }
 
@@ -463,23 +501,28 @@ function calcApprovalTerms(optionName, l) {
     };
   }
 
-  // ── Payment Supplement ──
+  // ── Payment Supplement (ML 2025-06) ──
   if (opt === "Payment Supplement") {
     const currentPITI = n(l.currentPITI);
-    const affordablePayment = gmi > 0 ? gmi * 0.31 : null;
-    const supplementNeeded = affordablePayment != null && currentPITI > 0 ? Math.max(0, currentPITI - affordablePayment) : null;
+    const currentPI_ps = n(l.currentPI);
+    const target25pct_ps = currentPI_ps > 0 ? (currentPI_ps * 0.75) + n(l.currentEscrow) : 0;
+    const fhaTarget_ps = n(l.targetPayment) || target25pct_ps || (gmi > 0 ? gmi * 0.31 : null);
+    const supplementNeeded = fhaTarget_ps != null && currentPITI > 0 ? Math.max(0, currentPITI - fhaTarget_ps) : null;
+    const moPR = supplementNeeded != null ? Math.max(20, supplementNeeded) : null; // $20 minimum
     const pctGMI = gmi > 0 && currentPITI > 0 ? (currentPITI / gmi * 100).toFixed(1) : null;
     return {
-      "Purpose": "Bridges gap between borrower's affordable payment and full PITI during unemployment",
+      "Purpose": "Bridges gap between borrower's affordable payment and full PITI — ML 2025-06",
+      "Eligible Borrowers": "All eligible delinquent FHA borrowers (not limited to unemployed)",
       "Current Monthly PITI": fmt$(currentPITI || null),
-      "Borrower's Affordable Payment (31% GMI)": affordablePayment != null ? fmt$(affordablePayment) : "Enter GMI",
-      "Estimated Monthly Supplement Amount": supplementNeeded != null ? fmt$(supplementNeeded) : "Enter PITI & GMI",
+      "Target (25% P&I Reduction)": currentPI_ps > 0 ? `${fmt$(currentPI_ps * 0.75)} P&I + ${fmt$(n(l.currentEscrow))} escrow = ${fmt$(target25pct_ps)} PITI` : "Enter current P&I",
+      "Estimated Monthly Supplement (MoPR)": supplementNeeded != null ? `${fmt$(supplementNeeded)} (min $20.00)` : "Enter PITI & current P&I",
+      "Minimum Monthly MoPR": "$20.00",
       "Current PITI as % of GMI": pctGMI ? pctGMI+"%" : "Enter GMI & PITI",
       "Combo Payment ≤ 40% GMI?": gmi > 0 && currentPITI > 0 ? (currentPITI/gmi <= 0.40 ? "✅ Yes" : "❌ No — exceeds 40% cap") : "Enter inputs",
-      "Supplement Source": "FHA — paid directly to servicer via partial claim",
+      "Supplement Source": "FHA — paid directly to servicer as monthly partial claim",
       "Maximum Duration": "Up to 36 months",
-      "Eligibility Basis": "Borrower unemployed AND ineligible for all standard retention options",
-      "Follow-On": "Permanent loss mitigation option required upon re-employment",
+      "Follow-On": "Permanent loss mitigation option required at or before end of supplement period",
+      "Authority": "HUD ML 2025-06 / ML 2025-12 — effective October 1, 2025",
     };
   }
 
@@ -517,37 +560,6 @@ function calcApprovalTerms(optionName, l) {
     };
   }
 
-  // ── FHA 40-Year Loan Modification (ML 2023-22 — effective May 2024) ──
-  if (opt === "FHA 40-Year Loan Modification") {
-    const newMat480 = newFirstPmt ? addMonths(newFirstPmt, 480) : null;
-    const newPI = pmms > 0 && newUPB > 0 ? calcMonthlyPI(newUPB, pmms, 480) : null;
-    const newPITI = newPI != null ? newPI + currentEscrow : null;
-    const targetMet = target > 0 && newPITI != null ? newPITI <= target : null;
-    const ubpCheck = originalUpb > 0 ? newUPB <= originalUpb : null;
-    const pctGMI = gmi > 0 && newPITI != null ? (newPITI/gmi*100).toFixed(1) : null;
-    return {
-      "Modified Loan Amount (New UPB)": fmt$(newUPB),
-      "UPB ≤ Original UPB?": ubpCheck == null ? "Enter Original UPB" : ubpCheck ? `✅ Yes — ${fmt$(newUPB)} ≤ ${fmt$(originalUpb)}` : `❌ No — ${fmt$(newUPB)} exceeds ${fmt$(originalUpb)} — ineligible`,
-      "Capitalized Amount": fmt$(capAmount),
-      "  → Arrearages": fmt$(arrears),
-      "  → Escrow Shortage": fmt$(escShortage),
-      "  → Legal / Foreclosure Fees": fmt$(legal),
-      "  → Late Fees (EXCLUDED)": lateFees > 0 ? `${fmt$(lateFees)} — NOT capitalized` : "None",
-      "New Interest Rate": pmms > 0 ? fmtPct(pmms)+" (PMMS — required per ML 2023-22)" : "Enter PMMS rate",
-      "New Loan Term": "480 months (40 years)",
-      "New Monthly P&I": fmt$(newPI),
-      "New Monthly Escrow": fmt$(currentEscrow || null),
-      "New Monthly PITI": fmt$(newPITI),
-      "New PITI as % of GMI": pctGMI ? pctGMI+"%" : "Enter GMI",
-      "Target Payment (31% GMI)": gmi > 0 ? fmt$(gmi*0.31) : "Enter GMI",
-      "Target Payment Met?": targetMet == null ? "Enter PMMS rate & GMI" : targetMet ? "✅ Yes" : "❌ No — consider Combo Mod+PC",
-      "New Maturity Date": fmtDate(newMat480),
-      "Maturity Basis": "480 months from new first payment date (ML 2023-22)",
-      "New First Payment Date": fmtDate(newFirstPmt),
-      "Trial Payment Plan": "3-month TPP required (ML 2023-22 §III.A.2)",
-      "Authority": "HUD ML 2023-22 — effective for case numbers assigned on/after May 8, 2024",
-    };
-  }
 
   // ── USDA Streamline Loan Modification ──
   if (opt === "USDA Streamline Loan Modification") {
@@ -750,14 +762,15 @@ function calcApprovalTerms(optionName, l) {
   if (opt === "VA Reinstatement") {
     const currentPITI = n(l.currentPITI);
     const totalArrears = arrears || (currentPITI * dlqMonths);
-    const totalReinstate = totalArrears + lateFees + legal;
+    const totalDue = totalArrears + legal + lateFees + accruedInterest;
+    const netDue = Math.max(0, totalDue - suspense);
     return {
-      "Reinstatement Amount (P&I + Escrow Advances)": fmt$(totalArrears || null),
-      "  → Arrearages (P&I)": fmt$(arrears || null),
-      "  → Escrow Shortage / Advances": fmt$(escShortage || null),
-      "Late Fees": fmt$(lateFees || null)+" (included per servicer policy)",
-      "Legal / Foreclosure Fees": fmt$(legal || null)+" (if applicable)",
-      "Estimated Total Due": fmt$(totalReinstate || null),
+      "Reinstatement Amount (Est. Total Due)": fmt$(netDue),
+      "  → Past-Due Arrearages (P&I + Escrow)": fmt$(totalArrears || null),
+      "  → Legal / Foreclosure Fees": legal > 0 ? fmt$(legal) : "None",
+      "  → Late Fees": lateFees > 0 ? fmt$(lateFees)+" (per servicer policy)" : "None",
+      "  → Accrued Delinquent Interest": accruedInterest > 0 ? fmt$(accruedInterest) : "None",
+      "  → Suspense / Unapplied Funds Offset": suspense > 0 ? fmt$(suspense) : "None",
       "Payment Method": "Certified funds — cashier's check or wire transfer",
       "Quote Validity": "Typically 30 days from quote date; request updated quote if expired",
       "Effect": "Full reinstatement cures the default — no plan or modification required",
@@ -864,13 +877,16 @@ function calcApprovalTerms(optionName, l) {
     const newPI = rateToUse > 0 && newUPB > 0 ? calcMonthlyPI(newUPB, rateToUse, termMonths) : null;
     const newPITI = newPI != null ? newPI + currentEscrow : null;
 
+    // Use only the explicitly entered original UPB — never fall back to current UPB for VA cap checks
+    const enteredOrigUpb = n(l.originalUpb);
+
     // Arrearages 25% cap — applies to 30-year and Traditional only (Circular 26-22-18 removes this for 40-year)
-    const arrearsPct = originalUpb > 0 ? (capAmount / originalUpb * 100).toFixed(1) : null;
+    const arrearsPct = enteredOrigUpb > 0 ? (capAmount / enteredOrigUpb * 100).toFixed(1) : null;
     const arrearsCheck = arrearsPct != null ? parseFloat(arrearsPct) <= 25 : null;
 
     // UPB cap — 30-year/Traditional: new UPB must not exceed original UPB
     // 40-year: no restriction — Circular 26-22-18 explicitly allows new UPB to exceed original
-    const ubpCheck = newUPB <= originalUpb;
+    const ubpCheck = enteredOrigUpb > 0 ? newUPB <= enteredOrigUpb : null;
 
     // Payment reduction
     const currentPI_val = n(l.currentPI);
@@ -886,7 +902,7 @@ function calcApprovalTerms(optionName, l) {
       "Modified Loan Amount (New UPB)": fmt$(newUPB),
       ...(is40yr
         ? { "UPB vs Original": originalUpb > 0 ? `${fmt$(newUPB)} vs ${fmt$(originalUpb)} original — ✅ No cap for 40-year (Circular 26-22-18)` : "Enter Original UPB" }
-        : { "  UPB ≤ Original UPB?": originalUpb > 0 ? (ubpCheck ? `✅ Yes — ${fmt$(newUPB)} ≤ ${fmt$(originalUpb)}` : `❌ No — ${fmt$(newUPB)} exceeds ${fmt$(originalUpb)}`) : "Enter Original UPB" }
+        : { "  UPB ≤ Original UPB?": ubpCheck == null ? "Enter Original UPB" : (ubpCheck ? `✅ Yes — ${fmt$(newUPB)} ≤ ${fmt$(enteredOrigUpb)}` : `❌ No — ${fmt$(newUPB)} exceeds ${fmt$(enteredOrigUpb)}`) }
       ),
       "Capitalized Amount": fmt$(capAmount),
       ...(is40yr
@@ -1054,7 +1070,7 @@ function calcApprovalTerms(optionName, l) {
       "  → Escrow Advances (servicer third-party)": escrowAdv > 0 ? fmt$(escrowAdv) : "$0.00 — enter escrow advance balance if applicable",
       "  → Suspense / Unapplied Funds": suspense > 0 ? `${fmt$(suspense)} offset → net ${estNetForbearance != null ? fmt$(estNetForbearance) : "N/A"}` : "$0.00",
       "  → Escrow Shortage": escShortage > 0 ? `${fmt$(escShortage)} — NOT deferred; spread over escrow analysis` : "None",
-      "Cumulative Cap (Non-Disaster)": `18-month lifetime cap (non-disaster); ${n(l.fhlmcCumulativeDeferredMonths)}mo used + ${Math.min(dlqMonths, 6)}mo this deferral = ${n(l.fhlmcCumulativeDeferredMonths) + Math.min(dlqMonths, 6)}mo total; prior non-disaster deferral must be ≥ 12 months ago`,
+      "Cumulative Cap (Non-Disaster)": `12-month lifetime cap (non-disaster); ${n(l.fhlmcCumulativeDeferredMonths)}mo used + ${Math.min(dlqMonths, 6)}mo this deferral = ${n(l.fhlmcCumulativeDeferredMonths) + Math.min(dlqMonths, 6)}mo total; prior non-disaster deferral must be ≥ 12 months ago`,
       "Interest on Deferred Balance": "None — non-interest-bearing",
       "Deferred Balance Due": "At maturity, sale/transfer, refinance, or payoff",
       "First Payment After Deferral": "Full contractual monthly payment",
@@ -1306,7 +1322,7 @@ function calcApprovalTerms(optionName, l) {
     const currentPI_val = n(l.currentPI);
     const deferMonths = Math.min(n(l.delinquencyMonths), 6);
     const cumUsed = n(l.fnmaCumulativeDeferredMonths);
-    const cumRemaining = Math.max(0, 18 - cumUsed);
+    const cumRemaining = Math.max(0, 12 - cumUsed);
     const effectiveDeferMonths = Math.min(deferMonths, cumRemaining);
     // Estimated total P&I forbearance = delinquent months × P&I (SMDU approach)
     const estPIForbearance = currentPI_val > 0 ? effectiveDeferMonths * currentPI_val : null;
@@ -1339,7 +1355,7 @@ function calcApprovalTerms(optionName, l) {
       "  → Escrow Shortage": escShortage > 0 ? `${fmt$(escShortage)} — repaid over 60-month escrow analysis (NOT deferred)` : "None",
       "Post-Workout UPB (Est.)": hasPI ? fmt$(estPostWorkoutUPB) : "Enter P&I and rate",
       "P&I Payment After Deferral": currentPI_val > 0 ? `${fmt$(currentPI_val)} — UNCHANGED (no modification to rate, term, or payment)` : "Full contractual monthly payment — no change",
-      "Cumulative Cap": `${cumUsed} months used → ${cumulativeAfter} after this deferral / 18-month lifetime cap (disaster deferrals excluded)`,
+      "Cumulative Cap": `${cumUsed} months used → ${cumulativeAfter} after this deferral / 12-month lifetime cap (disaster deferrals excluded)`,
       "Interest on Deferred Balance": "None — non-interest-bearing balance",
       "Deferred Balance Due": "At maturity, sale/transfer, refinance, or payoff of interest-bearing UPB",
       "Late Charges": "All waived upon completion",
@@ -1444,7 +1460,7 @@ function calcApprovalTerms(optionName, l) {
     const newMaturity = achievedTerm === 480 ? newMat480 : newMatStd;
     const tppMonths = dlqMonths >= 1 ? "3-month TPP (31+ days DLQ)" : "4-month TPP (current or <31 DLQ)";
     return {
-      "Modification Type": `Fannie Mae Flex Modification${opt.includes("Streamlined") ? " (Streamlined — No BRP/Hardship Doc Required)" : opt.includes("Disaster") ? " (Disaster)" : ""} — Fixed Rate`,
+      "Modification Type": `Fannie Mae Flex Modification${opt.includes("Streamlined") ? " (Streamlined — No BRP/Hardship Doc Required)" : opt.includes("Disaster") ? " (Disaster)" : ""} — ${isARM ? "Adjustable Rate Mortgage (ARM)" : "Fixed Rate"}`,
       "Step Applied": stepApplied || "Enter loan data for step analysis",
       "Pre-Workout UPB": priorDeferredUPB > 0 ? `${fmt$(preWorkoutUPB)} (servicer UPB ${fmt$(upb)} + prior deferred ${fmt$(priorDeferredUPB)})` : fmt$(upb),
       "Capitalized Amount": fmt$(arrears + legal),
@@ -1523,34 +1539,38 @@ function node(q, a, pass) { return { question:q, answer:String(a), pass }; }
 // ─── ELIGIBILITY ENGINES ─────────────────────────────────────────────────────
 function evaluateFHA(l) {
   const results = [];
-  const dlq=n(l.delinquencyMonths), priorHAMP=n(l.priorFHAHAMPMonths), gmi=n(l.grossMonthlyIncome);
-  // Issue 1 fix: only use explicitly entered Original UPB — never fall back to current UPB
+  const dlq=n(l.delinquencyMonths), priorHR=n(l.priorFHAHAMPMonths), gmi=n(l.grossMonthlyIncome);
   const origUpbFHA = n(l.originalUpb);
   const origUpbEntered = origUpbFHA > 0;
   const capAmtFHA = n(l.arrearagesToCapitalize) + n(l.escrowShortage) + n(l.legalFees);
   const newUPBFHA = n(l.upb) + capAmtFHA;
-  // 40-Year UPB check: only enforce when Original UPB is entered; otherwise warn
   const upbWithinOrig = !origUpbEntered || newUPBFHA <= origUpbFHA;
   const upbWithinOrigLabel = !origUpbEntered ? "Enter Original UPB to verify" : (newUPBFHA <= origUpbFHA ? `✅ ${newUPBFHA.toFixed(2)} ≤ ${origUpbFHA.toFixed(2)}` : `❌ ${newUPBFHA.toFixed(2)} > ${origUpbFHA.toFixed(2)}`);
 
   const baseNodes=[node("Occupancy=Owner Occupied",l.occupancyStatus,l.occupancyStatus==="Owner Occupied"),node("Foreclosure≠Active",!l.foreclosureActive,!l.foreclosureActive),node("Property≠Condemned/Uninhabitable",l.propertyCondition,l.propertyCondition!=="Condemned"&&l.propertyCondition!=="Uninhabitable"),node("Property=Principal Residence",l.propertyDisposition,l.propertyDisposition==="Principal Residence"),node("Lien=First",l.lienPosition,l.lienPosition==="First")];
   const baseEligible=baseNodes.every(nd=>nd.pass);
 
-  // ── Auto-compute re-amortization achievability ────────────────────────────────
+  // ML 2025-06/ML 2025-12: mod rate = PMMS + 25bps, rounded to nearest 0.125%
   const fhaPmms = n(l.pmmsRate);
+  const fhaModRate = fhaPmms > 0 ? Math.round((fhaPmms + 0.25) / 0.125) * 0.125 : 0;
   const fhaEscrow = n(l.currentEscrow);
-  const fhaTarget = n(l.targetPayment) || (gmi > 0 ? gmi * 0.31 : 0);
-  const fhaHasInputs = fhaPmms > 0 && fhaTarget > 0 && newUPBFHA > 0;
-  const fhaPITI360 = fhaHasInputs ? (calcMonthlyPI(newUPBFHA, fhaPmms, 360) ?? 0) + fhaEscrow : null;
-  const fhaPITI480 = fhaHasInputs ? (calcMonthlyPI(newUPBFHA, fhaPmms, 480) ?? 0) + fhaEscrow : null;
+
+  // ML 2025-06: target = 25% P&I reduction (replaces 31% GMI target)
+  const currentPI_fha = n(l.currentPI);
+  const targetPITI_25pct = currentPI_fha > 0 ? (currentPI_fha * 0.75) + fhaEscrow : 0;
+  const fhaTarget = n(l.targetPayment) || targetPITI_25pct;
+
+  // Re-amortization achievability (using new mod rate)
+  const fhaHasInputs = fhaModRate > 0 && fhaTarget > 0 && newUPBFHA > 0;
+  const fhaPITI360 = fhaHasInputs ? (calcMonthlyPI(newUPBFHA, fhaModRate, 360) ?? 0) + fhaEscrow : null;
+  const fhaPITI480 = fhaHasInputs ? (calcMonthlyPI(newUPBFHA, fhaModRate, 480) ?? 0) + fhaEscrow : null;
   const canAchieve360 = fhaPITI360 != null ? fhaPITI360 <= fhaTarget : l.canAchieveTargetByReamort;
   const canAchieve480 = fhaPITI480 != null ? fhaPITI480 <= fhaTarget : l.canAchieveTargetBy480Reamort;
   const achieve360Label = fhaHasInputs ? `PITI $${fhaPITI360!.toFixed(2)} ${canAchieve360?"≤":">"} target $${fhaTarget.toFixed(2)}` : `Manual: ${canAchieve360?"Yes":"No"}`;
   const achieve480Label = fhaHasInputs ? `PITI $${fhaPITI480!.toFixed(2)} ${canAchieve480?"≤":">"} target $${fhaTarget.toFixed(2)}` : `Manual: ${canAchieve480?"Yes":"No"}`;
 
-  // ── Issue 3+6 fix: auto-compute Combo achievability ───────────────────────────
-  // Combo achieves target when the PC deferral needed fits within remaining 30% cap.
-  const fhaMonthlyRate = fhaPmms > 0 ? fhaPmms / 100 / 12 : 0;
+  // Combo achievability: PC closes gap, residual amortized 360 months at new rate
+  const fhaMonthlyRate = fhaModRate > 0 ? fhaModRate / 100 / 12 : 0;
   const targetPI_combo = fhaTarget > 0 && fhaEscrow >= 0 ? fhaTarget - fhaEscrow : null;
   const targetUPB_combo = targetPI_combo != null && targetPI_combo > 0 && fhaMonthlyRate > 0
     ? targetPI_combo * ((1 - Math.pow(1 + fhaMonthlyRate, -360)) / fhaMonthlyRate) : null;
@@ -1558,27 +1578,18 @@ function evaluateFHA(l) {
   const fhaMaxPC = origUpbEntered ? origUpbFHA * 0.30 : (n(l.upb) * 0.30);
   const fhaPCAvailable = Math.max(0, fhaMaxPC - fhaPriorPC);
   const pcNeeded = targetUPB_combo != null ? Math.max(0, newUPBFHA - targetUPB_combo) : null;
-  // comboWithinCap: true = PC deferral fits within 30% cap (computed); null = can't determine
   const comboWithinCap = pcNeeded != null ? pcNeeded <= fhaPCAvailable : null;
-  // Issue 6 fix: use computed cap check for Combo cok; fall back to manual pcPct only if inputs missing
   const comboCapPass = comboWithinCap != null ? comboWithinCap : (n(l.partialClaimPct) <= 30);
   const cok = comboCapPass || (l.arrearsExceed30PctLimit && l.modPaymentLe40PctGMI);
   const comboCapLabel = comboWithinCap != null
     ? `PC needed $${(pcNeeded??0).toFixed(2)} ${comboWithinCap?"≤":">"} available $${fhaPCAvailable.toFixed(2)}`
     : `Manual: PC% ${n(l.partialClaimPct).toFixed(1)}% ${n(l.partialClaimPct)<=30?"≤":">"} 30%`;
-  // Issue 3 fix: 40-Year only when Combo also fails (or can't be determined)
-  // comboSufficient = Combo is confirmed achievable → 40-Year should not be primary path
-  const comboSufficient = comboWithinCap === true && !canAchieve360;
 
-  // ── Issue 2 fix: auto-compute Standalone PC checks ───────────────────────────
-  const fhaCurrentRate = n(l.currentInterestRate);
+  // Auto-check for standalone PC: current PITI already at/below target
   const fhaCurrentPITI = n(l.currentPITI);
-  const rateAtOrBelowMarket = fhaCurrentRate > 0 && fhaPmms > 0 ? fhaCurrentRate <= fhaPmms : l.currentRateAtOrBelowMarket;
   const pitiAtOrBelowTarget = fhaCurrentPITI > 0 && fhaTarget > 0 ? fhaCurrentPITI <= fhaTarget : l.currentPITIAtOrBelowTarget;
-  const rateLabel = fhaCurrentRate > 0 && fhaPmms > 0 ? `${fhaCurrentRate.toFixed(4)}% ${rateAtOrBelowMarket?"≤":">"} PMMS ${fhaPmms.toFixed(4)}%` : `Manual: ${rateAtOrBelowMarket?"Yes":"No"}`;
-  const pitiLabel = fhaCurrentPITI > 0 && fhaTarget > 0 ? `PITI $${fhaCurrentPITI.toFixed(2)} ${pitiAtOrBelowTarget?"≤":">"} target $${fhaTarget.toFixed(2)}` : `Manual: ${pitiAtOrBelowTarget?"Yes":"No"}`;
 
-  // ── Issue 5: FHA Reinstatement ───────────────────────────────────────────────
+  // FHA Reinstatement
   results.push({option:"FHA Reinstatement",eligible:dlq>0,nodes:[node("Past-due amounts exist",dlq+"mo DLQ",dlq>0)],note:"Borrower pays all past-due P&I, escrow, fees, and charges to restore current status"});
 
   if (l.verifiedDisaster) {
@@ -1587,20 +1598,47 @@ function evaluateFHA(l) {
     results.push({option:"FHA Disaster Loan Modification",eligible:db&&canAchieve360&&(l.currentOrLe30DaysAtDisaster||l.incomeGePreDisaster||l.incomeDocProvided),nodes:[...dn,node("Target achievable by re-amortization",achieve360Label,canAchieve360),node("Income/DLQ condition",l.currentOrLe30DaysAtDisaster||l.incomeGePreDisaster||l.incomeDocProvided,l.currentOrLe30DaysAtDisaster||l.incomeGePreDisaster||l.incomeDocProvided)],note:!l.incomeDocProvided?"3-mo trial plan available":null});
     results.push({option:"FHA Disaster Standalone Partial Claim",eligible:db&&!canAchieve360&&comboCapPass,nodes:[...dn,node("Target NOT achievable by re-amortization",achieve360Label,!canAchieve360),node("PC within 30% cap",comboCapLabel,comboCapPass)]});
   }
-  const hb=baseEligible&&(priorHAMP===0||priorHAMP>=24)&&l.continuousIncome&&dlq>0&&STANDARD_HARDSHIPS.includes(l.hardshipType)&&l.borrowerIntentRetention;
-  const hn=[...baseNodes,node("Std hardship",l.hardshipType,STANDARD_HARDSHIPS.includes(l.hardshipType)),node("Continuous income",l.continuousIncome,l.continuousIncome),node("DLQ>0",dlq,dlq>0),node("Prior HAMP≥24mo or none",priorHAMP===0?"None":priorHAMP+"mo",priorHAMP===0||priorHAMP>=24),node("Intent=Retain",l.borrowerIntentRetention,l.borrowerIntentRetention)];
-  results.push({option:"FHA-HAMP Standalone Loan Modification",eligible:hb&&canAchieve360,nodes:[...hn,node("Target achievable by 360mo re-amortization",achieve360Label,canAchieve360)],calc:gmi>0?`Target 31% GMI: $${(gmi*0.31).toFixed(2)}/mo`:null});
-  // Issue 6 fix: Combo uses computed cap check
-  results.push({option:"FHA-HAMP Combo Loan Modification & Partial Claim",eligible:hb&&!canAchieve360&&cok,nodes:[...hn,node("Target NOT achievable by 360mo re-amortization",achieve360Label,!canAchieve360),node("PC within cap OR 40% exception",comboCapLabel,cok)],note:l.arrearsExceed30PctLimit&&l.modPaymentLe40PctGMI?"40% GMI exception applied":null,calc:gmi>0?`40% Cap: $${(gmi*0.40).toFixed(2)} | 31% Target: $${(gmi*0.31).toFixed(2)}`:null});
-  // Issue 3 fix: 40-Year only when Combo also can't achieve target
-  results.push({option:"FHA 40-Year Loan Modification",eligible:hb&&!canAchieve360&&!comboSufficient&&canAchieve480&&upbWithinOrig,nodes:[...hn,node("Target NOT achievable in 360mo",achieve360Label,!canAchieve360),node("Combo Mod also insufficient (PC cap exhausted or uncomputable)",comboCapLabel,!comboSufficient),node("Target achievable by 480mo re-amortization",achieve480Label,canAchieve480),node("New UPB ≤ Original UPB (ML 2023-22)",upbWithinOrigLabel,upbWithinOrig)],note:"ML 2023-22 — eff. May 2024; rate=PMMS; term=480mo",calc:gmi>0?`Target 31% GMI: $${(gmi*0.31).toFixed(2)}/mo`:null});
-  // Issue 2 fix: Standalone PC uses auto-computed rate and PITI checks
-  results.push({option:"FHA-HAMP Standalone Partial Claim",eligible:hb&&rateAtOrBelowMarket&&pitiAtOrBelowTarget&&comboCapPass,nodes:[...hn,node("Current rate at/below market (PMMS)",rateLabel,rateAtOrBelowMarket),node("Current PITI at/below 31% target",pitiLabel,pitiAtOrBelowTarget),node("PC within 30% statutory cap",comboCapLabel,comboCapPass)]});
-  results.push({option:"Payment Supplement",eligible:baseEligible&&!canAchieve360&&l.unemployed&&l.comboPaymentLe40PctIncome,nodes:[...baseNodes,node("Target NOT achievable by re-amortization",achieve360Label,!canAchieve360),node("Unemployed",l.unemployed,l.unemployed),node("Combo pmt≤40% GMI",l.comboPaymentLe40PctIncome,l.comboPaymentLe40PctIncome)]});
+
+  // Repayment Plan
   results.push({option:"Repayment Plan",eligible:dlq<=12&&l.canRepayWithin24Months&&!l.failedTPP,nodes:[node("DLQ≤12mo",dlq,dlq<=12),node("Can repay 24mo",l.canRepayWithin24Months,l.canRepayWithin24Months),node("No failed TPP",!l.failedTPP,!l.failedTPP)]});
+
+  // Formal Forbearance
   results.push({option:"Formal Forbearance",eligible:dlq<12&&(l.canRepayWithin6Months||l.requestedForbearance),nodes:[node("DLQ<12mo",dlq,dlq<12),node("Repay 6mo OR requested",l.canRepayWithin6Months||l.requestedForbearance,l.canRepayWithin6Months||l.requestedForbearance)]});
+
+  // ML 2025-12: home retention base — no continuousIncome req; 24-month cooldown
+  const cooldownOK = priorHR === 0 || priorHR >= 24;
+  const hb = baseEligible && cooldownOK && dlq > 0 && STANDARD_HARDSHIPS.includes(l.hardshipType) && l.borrowerIntentRetention;
+  const hn = [...baseNodes,
+    node("Std hardship",l.hardshipType,STANDARD_HARDSHIPS.includes(l.hardshipType)),
+    node("DLQ>0",dlq,dlq>0),
+    node("Prior home retention option ≥24mo ago or none (ML 2025-12)",priorHR===0?"None":priorHR+"mo",cooldownOK),
+    node("Intent=Retain",l.borrowerIntentRetention,l.borrowerIntentRetention)
+  ];
+
+  // FHA Standalone Partial Claim (step 3: borrower resumes pre-hardship payment; PC covers arrears)
+  results.push({option:"FHA Standalone Partial Claim",eligible:hb&&l.fhaBorrowerCanResumePreHardship&&comboCapPass,nodes:[...hn,node("Borrower can resume pre-hardship payment without modification",l.fhaBorrowerCanResumePreHardship?"Yes":"No",l.fhaBorrowerCanResumePreHardship),node("PC within 30% cap",comboCapLabel,comboCapPass)],note:"PC covers arrears only; no modification to rate, term, or payment — ML 2025-06"});
+
+  // FHA Payment Deferral (step 4: 3–12 months DLQ, hardship resolved, 12-month lifetime cap)
+  const fhaDeferCumUsed = n(l.fhaCumulativeDeferredMonths);
+  const fhaDeferPrior = n(l.fhaPriorDeferralMonths);
+  const fhaDeferDlqOK = dlq >= 3 && dlq <= 12;
+  const fhaDeferCumOK = fhaDeferCumUsed < 12;
+  const fhaDeferSpacingOK = fhaDeferPrior === 0 || fhaDeferPrior >= 12;
+  results.push({option:"FHA Payment Deferral",eligible:baseEligible&&fhaDeferDlqOK&&l.fhaHardshipResolved&&fhaDeferCumOK&&fhaDeferSpacingOK,nodes:[...baseNodes,node("DLQ 3–12 months",dlq+"mo",fhaDeferDlqOK),node("Hardship resolved",l.fhaHardshipResolved?"Yes":"No",l.fhaHardshipResolved),node("Cumulative FHA deferrals < 12 months",fhaDeferCumUsed+"mo",fhaDeferCumOK),node("Prior FHA deferral ≥12 months ago (or never)",fhaDeferPrior===0?"None":fhaDeferPrior+"mo ago",fhaDeferSpacingOK)],note:"2–6 months per event; ≥12 months between events; 12-month lifetime cap — ML 2025-06"});
+
+  // FHA 30-Year Standalone Modification (step 5: 25% P&I reduction, PMMS+25bps, 360 months)
+  results.push({option:"FHA 30-Year Standalone Modification",eligible:hb&&canAchieve360,nodes:[...hn,node("25% P&I reduction achievable by 360mo re-amortization",achieve360Label,canAchieve360)],note:fhaPmms>0?`Rate: PMMS ${fhaPmms.toFixed(3)}% + 25bps = ${fhaModRate.toFixed(3)}% — ML 2025-06`:null});
+
+  // FHA 40-Year Combination Modification + Partial Claim (step 6: 25% reduction with PC + 480 months)
+  results.push({option:"FHA 40-Year Combination Modification + Partial Claim",eligible:hb&&!canAchieve360&&cok&&canAchieve480&&upbWithinOrig,nodes:[...hn,node("25% reduction NOT achievable by 360mo re-amortization",achieve360Label,!canAchieve360),node("PC within 30% cap",comboCapLabel,cok),node("25% reduction achievable by 480mo re-amortization",achieve480Label,canAchieve480),node("New UPB ≤ Original UPB",upbWithinOrigLabel,upbWithinOrig)],note:"ML 2025-06 — rate: PMMS+25bps; term: 480 months"});
+
+  // Payment Supplement (step 7: all eligible delinquent borrowers, not unemployed-only — ML 2025-06)
+  results.push({option:"Payment Supplement",eligible:baseEligible&&dlq>0&&!canAchieve360&&l.comboPaymentLe40PctIncome,nodes:[...baseNodes,node("DLQ>0",dlq,dlq>0),node("25% P&I reduction NOT achievable by re-amortization",achieve360Label,!canAchieve360),node("Combo pmt≤40% GMI",l.comboPaymentLe40PctIncome,l.comboPaymentLe40PctIncome)],note:"ML 2025-06: Open to all eligible delinquent borrowers (not unemployed-only)"});
+
+  // Special Forbearance – Unemployment
   results.push({option:"Special Forbearance – Unemployment",eligible:dlq<=12&&!l.foreclosureActive&&l.hardshipType==="Unemployment"&&l.occupancyStatus==="Owner Occupied"&&l.propertyDisposition==="Principal Residence"&&l.verifiedUnemployment&&!l.continuousIncome&&l.ineligibleAllRetention&&!l.propertyListedForSale&&!l.assumptionInProcess,nodes:[node("DLQ≤12mo",dlq,dlq<=12),node("Hardship=Unemployment",l.hardshipType,l.hardshipType==="Unemployment"),node("Verified unemployment",l.verifiedUnemployment,l.verifiedUnemployment),node("No continuous income",!l.continuousIncome,!l.continuousIncome),node("Ineligible all retention",l.ineligibleAllRetention,l.ineligibleAllRetention),node("Not listed for sale",!l.propertyListedForSale,!l.propertyListedForSale),node("No assumption",!l.assumptionInProcess,!l.assumptionInProcess)]});
-  // Issue 4 fix: PFS/DIL with proper eligibility nodes
+
+  // PFS / DIL
   {
     const pfsIntentOK = !l.borrowerIntentRetention;
     const pfsHardshipOK = STANDARD_HARDSHIPS.includes(l.hardshipType) || l.hardshipType === "Disaster";
@@ -1774,7 +1812,7 @@ function evaluateFHLMC(l) {
     const eligLoanAge = loanAge >= 12;
     const fhlmcCumDeferred = n(l.fhlmcCumulativeDeferredMonths);
     const fhlmcPriorDeferral = n(l.fhlmcPriorDeferralMonths);
-    const eligCumCap = fhlmcCumDeferred < 18;
+    const eligCumCap = fhlmcCumDeferred < 12;
     const eligPriorDeferral = fhlmcPriorDeferral === 0 || fhlmcPriorDeferral >= 12;
     const nodes = [
       node("Conventional 1st lien", l.lienPosition, isConventional && isFirstLien),
@@ -1782,7 +1820,7 @@ function evaluateFHLMC(l) {
       node("DLQ 2–6 months", dlq+"mo", eligDlqRange),
       node("Hardship resolved", l.fhlmcHardshipResolved?"Yes":"No", l.fhlmcHardshipResolved),
       node("Can resume full contractual payment", l.fhlmcCanResumeFull?"Yes":"No", l.fhlmcCanResumeFull),
-      node("Cumulative deferred months < 18 (lifetime, non-disaster)", fhlmcCumDeferred+"mo", eligCumCap),
+      node("Cumulative deferred months < 12 (lifetime, non-disaster)", fhlmcCumDeferred+"mo", eligCumCap),
       node("Prior non-disaster deferral ≥ 12 months ago (or never)", fhlmcPriorDeferral===0?"None":fhlmcPriorDeferral+"mo ago", eligPriorDeferral),
       node("No approved liquidation option active", l.fhlmcApprovedLiquidationOption?"Active":"None", noActiveLiquidation),
       node("No active/performing TPP", l.fhlmcActiveTPP?"Active":"None", noActiveTPP),
@@ -1958,7 +1996,7 @@ function evaluateFNMA(l) {
     const eligLienPos = l.lienPosition === "First";
     const eligLoanAge = loanAge >= 12;
     const eligDlqRange = dlq >= 2 && dlq <= 6;
-    const eligCumCap = cumulativeDeferred < 18;
+    const eligCumCap = cumulativeDeferred < 12;
     const eligPriorDeferral = priorDeferralMonths === 0 || priorDeferralMonths >= 12;
     const eligNotNearMaturity = !l.fnmaWithin36MonthsMaturity;
     const eligNoFailedTPP = !l.fnmaFailedTPP12Months;
@@ -1970,7 +2008,7 @@ function evaluateFNMA(l) {
       node("Hardship resolved OR servicer imminent default determination", l.fnmaHardshipResolved?"Resolved":l.fnmaImminentDefault?"Imminent Default":"Neither", eligHardship),
       node("Can resume full contractual payment", l.fnmaCanResumeFull?"Yes":"No", l.fnmaCanResumeFull),
       node("Cannot reinstate or afford repayment plan", l.fnmaCannotReinstate?"Yes":"No", l.fnmaCannotReinstate),
-      node("Cumulative deferred months < 18 (lifetime)", cumulativeDeferred+"mo", eligCumCap),
+      node("Cumulative deferred months < 12 (lifetime)", cumulativeDeferred+"mo", eligCumCap),
       node("Prior non-disaster deferral ≥ 12 months ago (or never)", priorDeferralMonths===0?"None":priorDeferralMonths+"mo ago", eligPriorDeferral),
       node("Not within 36 months of maturity", l.fnmaWithin36MonthsMaturity?"Within 36mo":"OK", eligNotNearMaturity),
       node("No failed Flex Mod TPP within 12 months", l.fnmaFailedTPP12Months?"Yes":"No", eligNoFailedTPP),
@@ -2125,8 +2163,8 @@ function TermsTable({ optionName, terms }: { optionName: string; terms: Record<s
 function CalcTermsPanel({ optionName, loan }) {
   const terms = useMemo(() => calcApprovalTerms(optionName, loan), [optionName, loan]);
   const comboTerms = useMemo(() => {
-    if (optionName === "FHA-HAMP Standalone Loan Modification" && String(terms["Target Payment Met?"]).startsWith("❌")) {
-      return calcApprovalTerms("FHA-HAMP Combo Loan Modification & Partial Claim", loan);
+    if (optionName === "FHA 30-Year Standalone Modification" && String(terms["Target Met?"]).startsWith("❌")) {
+      return calcApprovalTerms("FHA 40-Year Combination Modification + Partial Claim", loan);
     }
     return null;
   }, [optionName, terms, loan]);
@@ -2141,7 +2179,7 @@ function CalcTermsPanel({ optionName, loan }) {
             <span className="text-[10px] font-black uppercase tracking-widest text-emerald-600 whitespace-nowrap">↓ Next Step — 31% Target Not Met</span>
             <div className="flex-1 h-px bg-emerald-200" />
           </div>
-          <TermsTable optionName="FHA-HAMP Combo Loan Modification & Partial Claim" terms={comboTerms} />
+          <TermsTable optionName="FHA 40-Year Combination Modification + Partial Claim" terms={comboTerms} />
         </div>
       )}
     </div>
@@ -2223,7 +2261,7 @@ function MainApp({profile,onSignOut}:{profile:Profile;onSignOut:()=>void}) {
     setAiLoading(true);setAiResponse("");
     const summary={loanType:loan.loanType,loanNumber:loan.loanNumber,borrowerName:loan.borrowerName,delinquencyMonths:loan.delinquencyMonths,hardship:loan.hardshipType,hardshipDuration:loan.hardshipDuration,grossMonthlyIncome:loan.grossMonthlyIncome,currentPITI:loan.currentPITI,upb:loan.upb,pmmsRate:loan.pmmsRate,eligibleOptions:eligible.map(r=>r.option),ineligibleOptions:ineligible.map(r=>({option:r.option,failedAt:r.nodes?.find(nd=>!nd.pass)?.question}))};
     try {
-      const resp=await fetch("https://api.anthropic.com/v1/messages",{method:"POST",headers:{"Content-Type":"application/json","x-api-key":apiKey.trim(),"anthropic-version":"2023-06-01","anthropic-dangerous-direct-browser-access":"true"},body:JSON.stringify({model:"claude-sonnet-4-5",max_tokens:1200,system:"You are a loss mitigation underwriting expert. Provide: 1) Plain-English borrower situation summary, 2) Recommended waterfall order with rationale, 3) Required documentation checklist, 4) Compliance watch-outs, 5) Next steps. Be concise and practical.",messages:[{role:"user",content:`Loss Mitigation Evaluation:\n${JSON.stringify(summary,null,2)}\n\nProvide expert analysis.`}]})});
+      const resp=await fetch("https://api.anthropic.com/v1/messages",{method:"POST",headers:{"Content-Type":"application/json","x-api-key":apiKey.trim(),"anthropic-version":"2023-06-01","anthropic-dangerous-direct-browser-access":"true"},body:JSON.stringify({model:"claude-sonnet-4-6",max_tokens:1200,system:"You are a loss mitigation underwriting expert. Provide: 1) Plain-English borrower situation summary, 2) Recommended waterfall order with rationale, 3) Required documentation checklist, 4) Compliance watch-outs, 5) Next steps. Be concise and practical.",messages:[{role:"user",content:`Loss Mitigation Evaluation:\n${JSON.stringify(summary,null,2)}\n\nProvide expert analysis.`}]})});
       const data=await resp.json();
       if (data.error) { setAiResponse("API Error: "+data.error.message); } else { setAiResponse(data.content?.[0]?.text||"No response."); }
     } catch(e){setAiResponse("Error connecting to AI assistant: "+(e instanceof Error?e.message:String(e)));}
@@ -2334,11 +2372,13 @@ function MainApp({profile,onSignOut}:{profile:Profile;onSignOut:()=>void}) {
                 <F label="Current Interest Rate (%)"><Num value={loan.currentInterestRate} onChange={v=>set("currentInterestRate",v)} placeholder="e.g. 6.5"/></F>
                 {loan.loanType !== "FHLMC" && <F label="PMMS Rate (%)"><Num value={loan.pmmsRate} onChange={v=>set("pmmsRate",v)} placeholder="e.g. 7.1"/></F>}
                 {gmi>0&&(loan.loanType === "FHA" || loan.loanType === "USDA")&&<div className="bg-emerald-50 rounded p-2 text-xs text-emerald-800 space-y-0.5 mt-1">
-                  <div>31% GMI Target: <strong>${target31}/mo</strong></div>
+                  {loan.loanType==="FHA"&&n(loan.currentPI)>0&&<div>FHA 25% P&I Target: <strong>{fmt$(n(loan.currentPI)*0.75)} P&I + {fmt$(n(loan.currentEscrow))} escrow</strong></div>}
+                  {loan.loanType==="USDA"&&<div>31% GMI Target: <strong>${target31}/mo</strong></div>}
                   <div>40% GMI Cap: <strong>${target40}/mo</strong></div>
                   {loan.currentPITI&&<div>PITI/GMI Ratio: <strong>{(n(loan.currentPITI)/gmi*100).toFixed(1)}%</strong></div>}
                 </div>}
-                {(loan.loanType === "FHA" || loan.loanType === "USDA") && <F label="Target Payment Override (optional — leave blank to use 31% GMI)"><Num value={loan.targetPayment} onChange={v=>set("targetPayment",v)} placeholder="Auto: 31% GMI" prefix="$"/></F>}
+                {loan.loanType === "FHA" && <F label="Target PITI Override (optional — leave blank to use 25% P&I reduction)"><Num value={loan.targetPayment} onChange={v=>set("targetPayment",v)} placeholder="Auto: 25% P&I reduction" prefix="$"/></F>}
+                {loan.loanType === "USDA" && <F label="Target Payment Override (optional — leave blank to use 31% GMI)"><Num value={loan.targetPayment} onChange={v=>set("targetPayment",v)} placeholder="Auto: 31% GMI" prefix="$"/></F>}
               </Sec>
               <Sec title="📐 Amounts to Capitalize / Defer">
                 <F label="Arrearages (past-due P&I + escrow advances — total for capitalization)"><Num value={loan.arrearagesToCapitalize} onChange={v=>set("arrearagesToCapitalize",v)} placeholder="e.g. 7200" prefix="$"/></F>
@@ -2393,10 +2433,9 @@ function MainApp({profile,onSignOut}:{profile:Profile;onSignOut:()=>void}) {
               </Sec>
               <Sec title="⚠️ Hardship">
                 <F label="Hardship Type"><Sel value={loan.hardshipType} onChange={v=>set("hardshipType",v)} options={HARDSHIP_TYPES}/></F>
-                <F label="Hardship Duration"><Sel value={loan.hardshipDuration} onChange={v=>set("hardshipDuration",v)} options={loan.loanType==="USDA"?["Short Term","Resolved","Long Term","Permanent"]:["Resolved","Long Term","Permanent"]}/></F>
+                <F label="Hardship Duration"><Sel value={loan.hardshipDuration} onChange={v=>set("hardshipDuration",v)} options={["Short Term","Long Term","Permanent","Unknown","Resolved"]}/></F>
                 <F label="Delinquency (months)"><Num value={loan.delinquencyMonths} onChange={v=>set("delinquencyMonths",v)} placeholder="e.g. 4"/></F>
                 <F label="Delinquency (days — override)"><Num value={loan.delinquencyDays} onChange={v=>set("delinquencyDays",v)} placeholder="e.g. 120"/></F>
-                {loan.loanType === "FHA" && <Tog label="Continuous Income (1+ borrowers)" value={loan.continuousIncome} onChange={v=>set("continuousIncome",v)}/>}
               </Sec>
             </div>
             {/* Col 3 - loan type specific */}
@@ -2406,35 +2445,43 @@ function MainApp({profile,onSignOut}:{profile:Profile;onSignOut:()=>void}) {
                 {loan.loanType==="VA"&&<Tog label="Modified P&I ≤ 90% of old P&I" value={loan.modifiedPILe90PctOld} onChange={v=>set("modifiedPILe90PctOld",v)}/>}
               </Sec>
               {loan.loanType==="FHA"&&(()=>{
-                const _pmms=n(loan.pmmsRate), _esc=n(loan.currentEscrow), _gmi=n(loan.grossMonthlyIncome);
-                const _tgt=n(loan.targetPayment)||(_gmi>0?_gmi*0.31:0);
+                const _pmms=n(loan.pmmsRate), _esc=n(loan.currentEscrow), _pi=n(loan.currentPI);
+                const _modRate=_pmms>0?Math.round((_pmms+0.25)/0.125)*0.125:0;
+                const _tgtPITI=_pi>0?(_pi*0.75)+_esc:0;
+                const _tgt=n(loan.targetPayment)||_tgtPITI;
                 const _upb=n(loan.upb)+n(loan.arrearagesToCapitalize)+n(loan.escrowShortage)+n(loan.legalFees);
-                const _hasInputs=_pmms>0&&_tgt>0&&_upb>0;
-                const _pi360=_hasInputs?calcMonthlyPI(_upb,_pmms,360):null;
+                const _hasInputs=_modRate>0&&_tgt>0&&_upb>0;
+                const _pi360=_hasInputs?calcMonthlyPI(_upb,_modRate,360):null;
                 const _piti360=_pi360!=null?_pi360+_esc:null;
-                const _pi480=_hasInputs?calcMonthlyPI(_upb,_pmms,480):null;
+                const _pi480=_hasInputs?calcMonthlyPI(_upb,_modRate,480):null;
                 const _piti480=_pi480!=null?_pi480+_esc:null;
                 const _can360=_piti360!=null?_piti360<=_tgt:loan.canAchieveTargetByReamort;
                 const _can480=_piti480!=null?_piti480<=_tgt:loan.canAchieveTargetBy480Reamort;
                 return (<>
-                <Sec title="FHA-HAMP">
-                  <F label="Prior FHA-HAMP Agreement (months ago)"><Num value={loan.priorFHAHAMPMonths} onChange={v=>set("priorFHAHAMPMonths",v)} placeholder="0 = none"/></F>
+                <Sec title="FHA Home Retention (ML 2025-06)">
+                  <F label="Prior Home Retention Option (months ago — 24-month cooldown)"><Num value={loan.priorFHAHAMPMonths} onChange={v=>set("priorFHAHAMPMonths",v)} placeholder="0 = none"/></F>
+                  {_pmms>0&&<div className="bg-blue-50 rounded p-2 text-xs text-blue-800 mt-1">Mod rate: PMMS {_pmms.toFixed(3)}% + 25bps = <strong>{_modRate.toFixed(3)}%</strong> (rounded to nearest 0.125%)</div>}
+                  {_pi>0&&<div className="bg-emerald-50 rounded p-2 text-xs text-emerald-800 mt-0.5">25% P&I target: {fmt$(_pi*0.75)} + {fmt$(_esc)} escrow = <strong>{fmt$(_tgtPITI)}</strong> PITI</div>}
                   {_hasInputs
-                    ? <div className="flex items-center justify-between py-1 text-xs"><span className="text-slate-600">Target achievable by 360mo re-amortization</span><span className={`font-semibold ${_can360?"text-emerald-600":"text-red-500"}`}>{_can360?"✅ Yes":"❌ No"} — auto (PITI ${fmt$(_piti360)} vs ${fmt$(_tgt)})</span></div>
-                    : <Tog label="Can achieve target by re-amortizing 360 months (manual — enter PMMS & GMI to auto-compute)" value={loan.canAchieveTargetByReamort} onChange={v=>set("canAchieveTargetByReamort",v)}/>}
+                    ? <div className="flex items-center justify-between py-1 text-xs"><span className="text-slate-600">25% P&I reduction achievable (360mo re-amortization)</span><span className={`font-semibold ${_can360?"text-emerald-600":"text-red-500"}`}>{_can360?"✅ Yes":"❌ No"} — auto (PITI {fmt$(_piti360)} vs {fmt$(_tgt)})</span></div>
+                    : <Tog label="Can achieve 25% P&I reduction by re-amortizing 360 months (manual — enter PMMS & current P&I to auto-compute)" value={loan.canAchieveTargetByReamort} onChange={v=>set("canAchieveTargetByReamort",v)}/>}
                   {_hasInputs
-                    ? <div className="flex items-center justify-between py-1 text-xs"><span className="text-slate-600">Target achievable by 480mo re-amortization (40-Year)</span><span className={`font-semibold ${_can480?"text-emerald-600":"text-red-500"}`}>{_can480?"✅ Yes":"❌ No"} — auto (PITI ${fmt$(_piti480)} vs ${fmt$(_tgt)})</span></div>
-                    : <Tog label="Can achieve 31% target via 480-month re-amortization (FHA 40-Year) (manual — enter PMMS & GMI to auto-compute)" value={loan.canAchieveTargetBy480Reamort} onChange={v=>set("canAchieveTargetBy480Reamort",v)}/>}
+                    ? <div className="flex items-center justify-between py-1 text-xs"><span className="text-slate-600">25% P&I reduction achievable (480mo re-amortization)</span><span className={`font-semibold ${_can480?"text-emerald-600":"text-red-500"}`}>{_can480?"✅ Yes":"❌ No"} — auto (PITI {fmt$(_piti480)} vs {fmt$(_tgt)})</span></div>
+                    : <Tog label="Can achieve 25% P&I reduction via 480-month re-amortization (40-Year Combo) (manual — enter PMMS & current P&I to auto-compute)" value={loan.canAchieveTargetBy480Reamort} onChange={v=>set("canAchieveTargetBy480Reamort",v)}/>}
+                  <Tog label="Borrower can resume pre-hardship payment without modification (Standalone PC)" value={loan.fhaBorrowerCanResumePreHardship} onChange={v=>set("fhaBorrowerCanResumePreHardship",v)}/>
+                  <Tog label="Hardship resolved (FHA Payment Deferral)" value={loan.fhaHardshipResolved} onChange={v=>set("fhaHardshipResolved",v)}/>
+                  <F label="Cumulative FHA Deferred Months (lifetime cap: 12)"><Num value={loan.fhaCumulativeDeferredMonths} onChange={v=>set("fhaCumulativeDeferredMonths",v)} placeholder="0"/></F>
+                  <F label="Months since prior FHA deferral (0 = never)"><Num value={loan.fhaPriorDeferralMonths} onChange={v=>set("fhaPriorDeferralMonths",v)} placeholder="0 = never"/></F>
                   <Tog label="Arrears exceed 30% statutory limit" value={loan.arrearsExceed30PctLimit} onChange={v=>set("arrearsExceed30PctLimit",v)}/>
                   {loan.arrearsExceed30PctLimit&&<Tog label="Modified payment ≤ 40% GMI" value={loan.modPaymentLe40PctGMI} onChange={v=>set("modPaymentLe40PctGMI",v)}/>}
-                  <Tog label="One+ borrowers unemployed" value={loan.unemployed} onChange={v=>set("unemployed",v)}/>
-                  <Tog label="Combo payment ≤ 40% of income" value={loan.comboPaymentLe40PctIncome} onChange={v=>set("comboPaymentLe40PctIncome",v)}/>
+                  <Tog label="Combo payment ≤ 40% of income (Payment Supplement)" value={loan.comboPaymentLe40PctIncome} onChange={v=>set("comboPaymentLe40PctIncome",v)}/>
                   <Tog label="Failed TPP in current default episode" value={loan.failedTPP} onChange={v=>set("failedTPP",v)}/>
                   <Tog label="Can repay within 24 months" value={loan.canRepayWithin24Months} onChange={v=>set("canRepayWithin24Months",v)}/>
                   <F label="Repayment Plan Term (months, max 24)"><Num value={loan.repayMonths} onChange={v=>set("repayMonths",Math.min(24,Math.max(1,parseInt(v)||24)).toString())} placeholder="24"/></F>
                   <Tog label="Can repay within 6 months" value={loan.canRepayWithin6Months} onChange={v=>set("canRepayWithin6Months",v)}/>
                   <Tog label="Forbearance requested" value={loan.requestedForbearance} onChange={v=>set("requestedForbearance",v)}/>
-                  <Tog label="Verified unemployment" value={loan.verifiedUnemployment} onChange={v=>set("verifiedUnemployment",v)}/>
+                  <Tog label="Verified unemployment (Special Forbearance)" value={loan.verifiedUnemployment} onChange={v=>set("verifiedUnemployment",v)}/>
+                  <Tog label="No continuous income (Special Forbearance)" value={!loan.continuousIncome} onChange={v=>set("continuousIncome",!v)}/>
                   <Tog label="Ineligible for all retention options" value={loan.ineligibleAllRetention} onChange={v=>set("ineligibleAllRetention",v)}/>
                   <Tog label="Property listed for sale" value={loan.propertyListedForSale} onChange={v=>set("propertyListedForSale",v)}/>
                   <Tog label="Assumption in process" value={loan.assumptionInProcess} onChange={v=>set("assumptionInProcess",v)}/>
@@ -2497,7 +2544,9 @@ function MainApp({profile,onSignOut}:{profile:Profile;onSignOut:()=>void}) {
               </>)}
               {loan.loanType==="VA"&&(<>
                 <Sec title="VA – Forbearance / Repayment">
+                  <Tog label="Borrower can afford reinstatement or repayment plan" value={loan.borrowerCanAffordReinstateOrRepay} onChange={v=>set("borrowerCanAffordReinstateOrRepay",v)}/>
                   <Tog label="Borrower confirmed cannot afford current payment" value={loan.borrowerConfirmedCannotAffordCurrent} onChange={v=>set("borrowerConfirmedCannotAffordCurrent",v)}/>
+                  <Tog label="Borrower can afford modified payment" value={loan.borrowerCanAffordModifiedPayment} onChange={v=>set("borrowerCanAffordModifiedPayment",v)}/>
                   <Tog label="Borrower can afford current monthly payment" value={loan.borrowerCanAffordCurrentMonthly} onChange={v=>set("borrowerCanAffordCurrentMonthly",v)}/>
                   <Tog label="Forbearance period < 12 months" value={loan.forbearancePeriodLt12} onChange={v=>set("forbearancePeriodLt12",v)}/>
                   <Tog label="Total DLQ < 12 months" value={loan.totalDLQLt12} onChange={v=>set("totalDLQLt12",v)}/>
@@ -2850,7 +2899,7 @@ function MainApp({profile,onSignOut}:{profile:Profile;onSignOut:()=>void}) {
                 </div>
                 <div className="flex items-center gap-2 mb-2 mt-3"><div className="h-3.5 w-0.5 rounded-full bg-slate-300"/><span className="text-[10px] font-black uppercase tracking-widest text-slate-400">Loan Details</span></div>
                 <div className="grid grid-cols-2 gap-2 mb-3">
-                  {[["Loan Type","loanType",LOAN_TYPES],["Hardship Type","hardshipType",HARDSHIP_TYPES],["Hardship Duration","hardshipDuration",["Resolved","Long Term","Permanent","Short Term"]]].map(([label,key,opts])=><div key={key} className="col-span-1"><label className="text-xs text-slate-500 mb-0.5 block">{label}</label><Sel value={loan2[key]} onChange={v=>set2(key,v)} options={opts}/></div>)}
+                  {[["Loan Type","loanType",LOAN_TYPES],["Hardship Type","hardshipType",HARDSHIP_TYPES],["Hardship Duration","hardshipDuration",["Short Term","Long Term","Permanent","Unknown","Resolved"]]].map(([label,key,opts])=><div key={key} className="col-span-1"><label className="text-xs text-slate-500 mb-0.5 block">{label}</label><Sel value={loan2[key]} onChange={v=>set2(key,v)} options={opts}/></div>)}
                   <div><label className="text-xs text-slate-500 mb-0.5 block">DLQ (months)</label><Num value={loan2.delinquencyMonths} onChange={v=>set2("delinquencyMonths",v)} placeholder="e.g. 6"/></div>
                   <div><label className="text-xs text-slate-500 mb-0.5 block">GMI</label><Num value={loan2.grossMonthlyIncome} onChange={v=>set2("grossMonthlyIncome",v)} placeholder="e.g. 5000" prefix="$"/></div>
                 </div>
