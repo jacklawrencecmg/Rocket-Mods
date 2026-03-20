@@ -4,15 +4,20 @@ import resolutionIQLogo from "../ResolutionIQ_logo.svg";
 
 // ─── CONSTANTS ────────────────────────────────────────────────────────────────
 const LOAN_TYPES = ["FHA","USDA","VA","FNMA","FHLMC"];
-const GUIDELINE_VERSIONS = {
-  FHA: "ML 2025-06 / ML 2025-12 (effective Aug 2025)",
-  USDA: "RD Instruction 3555-C, Final Rule Feb 2025",
-  VA: "M26-4, Circular 26-25-2 (effective May 1, 2025)",
-  FHLMC: "Single-Family Guide Ch. 9200, Bulletin 2026-2",
-  FNMA: "Servicing Guide D2-3.2, updated 2025",
+const GUIDELINE_VERSIONS: Record<string, {version: string, lastVerified: string, url: string}> = {
+  FHA:   { version: "ML 2025-06 / ML 2025-12", lastVerified: "2026-03-01", url: "https://www.hud.gov/program_offices/housing/sfh/nsc/memos" },
+  USDA:  { version: "RD Instruction 3555-C, Final Rule Feb 2025", lastVerified: "2026-03-01", url: "https://www.rd.usda.gov/resources/directives/instructions" },
+  VA:    { version: "M26-4, Circular 26-25-2 (eff. May 1 2025)", lastVerified: "2026-03-01", url: "https://www.benefits.va.gov/homeloans/servicer.asp" },
+  FHLMC: { version: "Single-Family Guide Ch. 9200, Bulletin 2026-2", lastVerified: "2026-03-01", url: "https://guide.freddiemac.com" },
+  FNMA:  { version: "Servicing Guide D2-3.2, updated 2025", lastVerified: "2026-03-01", url: "https://servicing-guide.fanniemae.com" },
 };
-const TABS = ["dashboard","inputs","results","audit","report","compare","portfolio"];
-const TAB_LABELS = { dashboard:"📊 Dashboard", inputs:"📋 Inputs", results:"✅ Results", audit:"🔍 Audit Trail", report:"📄 Report", compare:"⚖️ Compare", portfolio:"📦 Portfolio" };
+const guidelineDaysOld = (loanType: string): number => {
+  const gv = GUIDELINE_VERSIONS[loanType];
+  if (!gv) return 0;
+  return Math.floor((Date.now() - new Date(gv.lastVerified).getTime()) / 86400000);
+};
+const TABS = ["dashboard","inputs","results","audit","report","compare","portfolio","settings"];
+const TAB_LABELS = { dashboard:"📊 Dashboard", inputs:"📋 Inputs", results:"✅ Results", audit:"🔍 Audit Trail", report:"📄 Report", compare:"⚖️ Compare", portfolio:"📦 Portfolio", settings:"⚙️ Settings" };
 const HARDSHIP_TYPES = ["Reduction in Income","Unemployment","Business Failure","Increase in Housing Expenses","Property Problem","Unknown","Disaster"];
 
 // ─── OPTION DOCUMENTS ─────────────────────────────────────────────────────────
@@ -2918,6 +2923,19 @@ function MainApp({profile,onSignOut}:{profile:Profile;onSignOut:()=>void}) {
   // Team/assignment state
   const [assigneeEmail,setAssigneeEmail]=useState("");
   const [assigneeFilter,setAssigneeFilter]=useState("mine");
+  // Servicer overlay state
+  const [overlays, setOverlays] = useState({
+    minFICO: "",
+    maxDLQMonths: "",
+    requireBorrowerInterview: true,
+    requireIncomeVerification: true,
+    excludedHardshipTypes: [] as string[],
+    excludedOptions: [] as string[],
+    customNote: "",
+  });
+  // Notifications state
+  const [notifications, setNotifications] = useState<{id:string, message:string, type:"info"|"success"|"warning", read:boolean, createdAt:string}[]>([]);
+  const [showNotifications, setShowNotifications] = useState(false);
   useEffect(()=>{
     if(showAdmin&&profile.role==="admin"){
       supabase.rpc("get_pending_users").then(({data})=>setPendingUsers((data||[]) as any));
@@ -2935,6 +2953,14 @@ function MainApp({profile,onSignOut}:{profile:Profile;onSignOut:()=>void}) {
     setAdminMsg("Request denied and account removed.");
     setTimeout(()=>setAdminMsg(""),4000);
   };
+  // Overlay persistence
+  useEffect(() => {
+    const saved = localStorage.getItem("riq_overlays");
+    if (saved) try { setOverlays(JSON.parse(saved)); } catch {}
+  }, []);
+  useEffect(() => {
+    localStorage.setItem("riq_overlays", JSON.stringify(overlays));
+  }, [overlays]);
   // Offline detection
   useEffect(() => {
     const on = () => setIsOffline(false);
@@ -2979,6 +3005,28 @@ function MainApp({profile,onSignOut}:{profile:Profile;onSignOut:()=>void}) {
 
   useEffect(() => { if (tab === "dashboard") loadDashboard(); }, [tab, loadDashboard]);
 
+  const loadNotifications = useCallback(async () => {
+    if (!supabaseConfigured || !profile) return;
+    const { data } = await supabase
+      .from("evaluations")
+      .select("id, loan_number, borrower_name, status, created_at, assignee_email")
+      .eq("assignee_email", profile.email)
+      .order("created_at", { ascending: false })
+      .limit(10);
+    if (data) {
+      const notifs = data.map(c => ({
+        id: c.id,
+        message: `Case ${c.loan_number || c.borrower_name || "unknown"} assigned to you — status: ${c.status || "open"}`,
+        type: "info" as const,
+        read: false,
+        createdAt: c.created_at,
+      }));
+      setNotifications(notifs);
+    }
+  }, [profile]);
+
+  useEffect(() => { loadNotifications(); }, [loadNotifications]);
+
   const updateCaseStatus = async (id: string, status: string) => {
     await supabase.from("evaluations").update({ status }).eq("id", id);
     setDashCases(prev => prev.map(c => c.id === id ? { ...c, status } : c));
@@ -2997,9 +3045,29 @@ function MainApp({profile,onSignOut}:{profile:Profile;onSignOut:()=>void}) {
   const set=useCallback((k,v)=>{setLoan(p=>({...p,[k]:v}));setEvaluated(false);},[]);
   const set2=useCallback((k,v)=>{setLoan2(p=>({...p,[k]:v}));setEvaluated2(false);},[]);
   const evalLoan=(l)=>l.loanType==="FHA"?evaluateFHA(l):l.loanType==="USDA"?evaluateUSDA(l):l.loanType==="VA"?evaluateVA(l):l.loanType==="FNMA"?evaluateFNMA(l):evaluateFHLMC(l);
+  const applyOverlays = (evalResults: any[], loanData: any, ov: any) => {
+    return evalResults.map(r => {
+      if (!r.eligible) return r;
+      const blocks: string[] = [];
+      if (ov.minFICO && loanData.fhlmcFICO && Number(loanData.fhlmcFICO) < Number(ov.minFICO)) {
+        blocks.push(`Servicer overlay: FICO ${loanData.fhlmcFICO} below minimum ${ov.minFICO}`);
+      }
+      if (ov.maxDLQMonths && Number(loanData.delinquencyMonths) > Number(ov.maxDLQMonths)) {
+        blocks.push(`Servicer overlay: DLQ ${loanData.delinquencyMonths}mo exceeds servicer max ${ov.maxDLQMonths}mo`);
+      }
+      if (ov.excludedOptions.includes(r.option)) {
+        blocks.push(`Servicer overlay: ${r.option} excluded by servicer policy`);
+      }
+      if (blocks.length > 0) {
+        return { ...r, eligible: false, overlayBlocked: true, overlayReasons: blocks, nodes: [...(r.nodes||[]), ...blocks.map(b => ({question:"Servicer Overlay", answer:b, pass:false}))] };
+      }
+      return r;
+    });
+  };
   const evaluate=()=>{
     try {
-      setResults(evalLoan(loan));
+      const rawResults = evalLoan(loan);
+      setResults(applyOverlays(rawResults, loan, overlays));
       setValidationWarnings(validateLoan(loan));
       setEvaluated(true);
       setTab("results");
@@ -3024,7 +3092,7 @@ function MainApp({profile,onSignOut}:{profile:Profile;onSignOut:()=>void}) {
         loan_data:loan,
         results:results,
         notes:caseNotes||null,
-        guideline_version:GUIDELINE_VERSIONS[loan.loanType as keyof typeof GUIDELINE_VERSIONS]||null,
+        guideline_version:GUIDELINE_VERSIONS[loan.loanType as keyof typeof GUIDELINE_VERSIONS]?.version||null,
         evaluated_at:new Date().toISOString(),
         status:"evaluated",
         checked_docs:checkedDocs,
@@ -3214,7 +3282,7 @@ function MainApp({profile,onSignOut}:{profile:Profile;onSignOut:()=>void}) {
     w.document.write(`<html><head><title>LM Report — ${loan.loanType}</title><style>body{font-family:Arial,sans-serif;max-width:860px;margin:40px auto;color:#111;font-size:13px}h1{color:#1e3a5f;border-bottom:3px solid #1e3a5f;padding-bottom:8px}h2{color:#1e3a5f;border-bottom:1px solid #ddd;padding-bottom:4px;margin-top:24px}h3{margin:12px 0 4px;color:#1e3a5f}.eligible{background:#f0fdf4;border:1px solid #86efac;padding:12px;border-radius:6px;margin:8px 0}.ineligible{background:#fafafa;border:1px solid #e5e7eb;padding:8px;border-radius:4px;margin:4px 0}.stats{display:grid;grid-template-columns:repeat(5,1fr);gap:8px;margin:12px 0}.stat{background:#f8fafc;border:1px solid #e2e8f0;padding:8px;border-radius:4px;text-align:center}.sl{font-size:11px;color:#64748b}.sv{font-weight:bold;color:#1e293b}.footer{margin-top:40px;font-size:11px;color:#888;border-top:1px solid #e5e7eb;padding-top:12px}</style></head><body>
     <h1>Loss Mitigation Evaluation Report</h1>
     <p><strong>Evaluated:</strong> ${new Date().toLocaleString()} &nbsp;|&nbsp; <strong>Loan Type:</strong> ${loan.loanType}${loan.loanNumber?` &nbsp;|&nbsp; <strong>Loan #:</strong> ${loan.loanNumber}`:""}${loan.borrowerName?` &nbsp;|&nbsp; <strong>Borrower:</strong> ${loan.borrowerName}`:""} &nbsp;|&nbsp; <strong>DLQ:</strong> ${loan.delinquencyMonths||"—"} months &nbsp;|&nbsp; <strong>Hardship:</strong> ${loan.hardshipType} (${loan.hardshipDuration})</p>
-    <p style="font-size:11px;color:#64748b;margin:4px 0"><strong>Guidelines:</strong> ${GUIDELINE_VERSIONS[loan.loanType as keyof typeof GUIDELINE_VERSIONS]||loan.loanType}</p>
+    <p style="font-size:11px;color:#64748b;margin:4px 0"><strong>Guidelines:</strong> ${GUIDELINE_VERSIONS[loan.loanType as keyof typeof GUIDELINE_VERSIONS]?.version||loan.loanType}</p>
     ${topRecHTML}
     <div class="stats">
       <div class="stat"><div class="sl">Current UPB</div><div class="sv">${loan.upb?fmt$(n(loan.upb)):"—"}</div></div>
@@ -3370,6 +3438,36 @@ CREATE POLICY "Users see own cases" ON evaluations
               {LOAN_TYPES.map(t=>(<button key={t} onClick={()=>{set("loanType",t);setEvaluated(false);setResults([]);}} className={`px-4 py-1.5 rounded-lg text-sm font-black transition-all ${loan.loanType===t?"bg-white text-slate-900 shadow-md":"text-emerald-200 hover:text-white hover:bg-white/10"}`}>{t}</button>))}
             </div>
             {profile.role==="admin"&&<button onClick={()=>setShowAdmin(p=>!p)} className="text-emerald-300 hover:text-white text-xs font-semibold px-3 py-1.5 rounded-lg hover:bg-white/10 transition-all">Users</button>}
+            {supabaseConfigured && profile && (
+              <div className="relative">
+                <button onClick={() => setShowNotifications(!showNotifications)}
+                  className="relative text-slate-400 hover:text-slate-600 px-2 py-1">
+                  🔔
+                  {notifications.filter(n=>!n.read).length > 0 && (
+                    <span className="absolute -top-0.5 -right-0.5 bg-red-500 text-white text-[10px] rounded-full w-4 h-4 flex items-center justify-center font-bold">
+                      {notifications.filter(n=>!n.read).length}
+                    </span>
+                  )}
+                </button>
+                {showNotifications && (
+                  <div className="absolute right-0 top-8 w-72 bg-white rounded-xl shadow-xl border border-slate-200 z-50">
+                    <div className="p-3 border-b border-slate-100 flex items-center justify-between">
+                      <span className="text-sm font-bold text-slate-700">Notifications</span>
+                      <button onClick={() => setNotifications(n => n.map(x=>({...x,read:true})))} className="text-xs text-emerald-600">Mark all read</button>
+                    </div>
+                    {notifications.length === 0
+                      ? <div className="p-4 text-xs text-slate-400 text-center">No notifications</div>
+                      : notifications.slice(0,8).map(n => (
+                        <div key={n.id} className={`p-3 border-b border-slate-50 text-xs ${n.read?"text-slate-400":"text-slate-700 font-semibold"}`}>
+                          {n.message}
+                          <div className="text-slate-400 font-normal mt-0.5">{new Date(n.createdAt).toLocaleDateString()}</div>
+                        </div>
+                      ))
+                    }
+                  </div>
+                )}
+              </div>
+            )}
             <button onClick={onSignOut} className="text-emerald-300 hover:text-white text-xs font-semibold px-3 py-1.5 rounded-lg hover:bg-white/10 transition-all" title="Sign out">Sign out</button>
           </div>
         </div>
@@ -3401,6 +3499,19 @@ CREATE POLICY "Users see own cases" ON evaluations
               <div className="text-xl font-black text-slate-800">Case Dashboard</div>
               <button onClick={loadDashboard} className="text-xs bg-slate-100 hover:bg-slate-200 px-3 py-1.5 rounded-lg">🔄 Refresh</button>
               <button onClick={() => setTab("inputs")} className="text-xs bg-emerald-700 text-white hover:bg-emerald-800 px-3 py-1.5 rounded-lg ml-auto">+ New Evaluation</button>
+            </div>
+            <div className="flex flex-wrap gap-3 mb-4">
+              {Object.entries(GUIDELINE_VERSIONS).map(([type, gv]) => {
+                const days = guidelineDaysOld(type);
+                const color = days <= 90 ? "bg-emerald-400" : days <= 180 ? "bg-amber-400" : "bg-red-400";
+                return (
+                  <div key={type} className="flex items-center gap-1.5 text-xs text-slate-600">
+                    <span className={`w-2 h-2 rounded-full ${color}`}/>
+                    <span className="font-bold">{type}</span>
+                    <span className="text-slate-400">verified {days}d ago</span>
+                  </div>
+                );
+              })}
             </div>
             {/* Filters */}
             <div className="flex flex-wrap gap-2 mb-4">
@@ -4026,6 +4137,26 @@ CREATE POLICY "Users see own cases" ON evaluations
                     <div className="text-xs text-amber-500 mt-2">These are warnings only — evaluation results are shown below</div>
                   </div>
                 )}
+                {(() => {
+                  const daysOld = guidelineDaysOld(loan.loanType);
+                  const gv = GUIDELINE_VERSIONS[loan.loanType];
+                  if (!gv || daysOld <= 90) return null;
+                  return (
+                    <div className="bg-orange-50 border border-orange-200 rounded-xl p-3 mb-3 flex items-start gap-2">
+                      <span className="text-orange-500 text-lg">📅</span>
+                      <div className="flex-1">
+                        <div className="text-sm font-bold text-orange-800">Guideline Currency Warning</div>
+                        <div className="text-xs text-orange-700 mt-0.5">
+                          {loan.loanType} guidelines last verified {daysOld} days ago ({gv.lastVerified}).
+                          Verify <strong>{gv.version}</strong> is still current before issuing decisions.
+                        </div>
+                        <a href={gv.url} target="_blank" rel="noopener noreferrer" className="text-xs text-orange-600 underline mt-1 inline-block">
+                          Check {loan.loanType} guidelines →
+                        </a>
+                      </div>
+                    </div>
+                  );
+                })()}
                 {/* Recommended Path */}
                 {(()=>{
                   const {waterfallEligible,extras,topOption}=computeWaterfall(loan.loanType,eligible);
@@ -4217,13 +4348,15 @@ CREATE POLICY "Users see own cases" ON evaluations
                 <div className="text-[10px] font-black uppercase tracking-widest text-slate-400 mb-3">Ineligible Options</div>
                 {ineligible.map((r,i)=>{
                   const fail=r.nodes?.find(nd=>!nd.pass);
-                  return(<div key={i} className="bg-white border border-slate-200 rounded-xl mb-2 overflow-hidden shadow-sm">
+                  const isOverlay = r.overlayBlocked;
+                  return(<div key={i} className={`border rounded-xl mb-2 overflow-hidden shadow-sm ${isOverlay?"bg-red-50 border-red-200":"bg-white border-slate-200"}`}>
                     <button className="w-full text-left px-4 py-3 flex items-center justify-between" onClick={()=>setExpanded(expanded===`n${i}`?null:`n${i}`)}>
                       <div className="flex items-start gap-2.5">
-                        <span className="w-5 h-5 rounded-full bg-slate-200 flex items-center justify-center text-slate-500 text-[10px] font-black flex-shrink-0 mt-0.5">✗</span>
+                        <span className={`w-5 h-5 rounded-full flex items-center justify-center text-[10px] font-black flex-shrink-0 mt-0.5 ${isOverlay?"bg-red-200 text-red-700":"bg-slate-200 text-slate-500"}`}>{isOverlay?"🚫":"✗"}</span>
                         <div>
-                          <div className="font-semibold text-xs text-slate-700">{r.option}</div>
-                          {fail&&<div className="text-xs text-red-500 mt-0.5">↳ {fail.question}: <em>{fail.answer}</em></div>}
+                          <div className="font-semibold text-xs text-slate-700 flex items-center gap-2">{r.option}{isOverlay&&<span className="text-[10px] bg-red-100 text-red-700 px-1.5 py-0.5 rounded font-bold">🚫 Servicer Overlay</span>}</div>
+                          {isOverlay&&r.overlayReasons&&<div className="text-xs text-red-600 mt-0.5">{r.overlayReasons[0]}</div>}
+                          {!isOverlay&&fail&&<div className="text-xs text-red-500 mt-0.5">↳ {fail.question}: <em>{fail.answer}</em></div>}
                         </div>
                       </div>
                       <span className="text-slate-400 text-xs ml-2 flex-shrink-0">{expanded===`n${i}`?"▲":"▼"}</span>
@@ -4539,6 +4672,88 @@ CREATE POLICY "Users see own cases" ON evaluations
             )}
           </div>
         )}
+
+        {/* ── SETTINGS ── */}
+        {tab === "settings" && (
+          <div className="max-w-3xl mx-auto p-5">
+            <div className="text-xl font-black text-slate-800 mb-1">⚙️ Servicer Settings</div>
+            <div className="text-sm text-slate-500 mb-5">Configure servicer-specific overlays applied on top of agency guidelines</div>
+
+            <div className="bg-white rounded-2xl border border-slate-200 p-5 mb-4">
+              <div className="text-sm font-bold text-slate-700 mb-3">📋 Underwriting Overlays</div>
+              <div className="text-xs text-amber-700 bg-amber-50 rounded-lg p-3 mb-4">
+                ⚠️ Overlays are applied on top of agency guidelines. Options blocked by overlays will show as ineligible with an overlay reason in the audit trail.
+              </div>
+
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <div>
+                  <label className="text-xs font-bold text-slate-600 block mb-1">Minimum FICO Score (0 = no overlay)</label>
+                  <input type="number" className="border rounded-lg px-3 py-2 text-sm w-full"
+                    value={overlays.minFICO} onChange={e=>setOverlays(o=>({...o,minFICO:e.target.value}))}
+                    placeholder="e.g. 580"/>
+                </div>
+                <div>
+                  <label className="text-xs font-bold text-slate-600 block mb-1">Max Delinquency (months, 0 = no limit)</label>
+                  <input type="number" className="border rounded-lg px-3 py-2 text-sm w-full"
+                    value={overlays.maxDLQMonths} onChange={e=>setOverlays(o=>({...o,maxDLQMonths:e.target.value}))}
+                    placeholder="e.g. 24"/>
+                </div>
+              </div>
+
+              <div className="mt-4">
+                <label className="text-xs font-bold text-slate-600 block mb-2">Excluded Loss Mitigation Options</label>
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-1">
+                  {["Payment Supplement","VASP (VA Partial Claim)","USDA Deed-in-Lieu","Freddie Mac Deed-in-Lieu","FNMA Deed-in-Lieu","VA Deed-in-Lieu"].map(opt => (
+                    <label key={opt} className="flex items-center gap-2 text-sm cursor-pointer">
+                      <input type="checkbox" className="accent-red-500"
+                        checked={overlays.excludedOptions.includes(opt)}
+                        onChange={e => setOverlays(o => ({...o, excludedOptions: e.target.checked ? [...o.excludedOptions, opt] : o.excludedOptions.filter(x=>x!==opt)}))}/>
+                      {opt}
+                    </label>
+                  ))}
+                </div>
+              </div>
+
+              <div className="mt-4">
+                <label className="text-xs font-bold text-slate-600 block mb-1">Custom Report Footer Note</label>
+                <textarea className="border rounded-lg px-3 py-2 text-sm w-full h-20 resize-none"
+                  value={overlays.customNote} onChange={e=>setOverlays(o=>({...o,customNote:e.target.value}))}
+                  placeholder="e.g. This evaluation is subject to CMG Financial servicer overlays effective January 2026..."/>
+              </div>
+            </div>
+
+            <div className="bg-white rounded-2xl border border-slate-200 p-5 mb-4">
+              <div className="text-sm font-bold text-slate-700 mb-3">📅 Guideline Currency</div>
+              {Object.entries(GUIDELINE_VERSIONS).map(([type, gv]) => {
+                const days = guidelineDaysOld(type);
+                const color = days <= 90 ? "text-emerald-600" : days <= 180 ? "text-amber-600" : "text-red-600";
+                return (
+                  <div key={type} className="flex items-center gap-3 py-2 border-b border-slate-100 last:border-0">
+                    <span className="font-bold text-slate-700 w-14">{type}</span>
+                    <span className="text-xs text-slate-600 flex-1">{gv.version}</span>
+                    <span className={`text-xs font-semibold ${color}`}>{days}d ago</span>
+                    <a href={gv.url} target="_blank" rel="noopener noreferrer" className="text-xs text-emerald-600 underline">Check →</a>
+                  </div>
+                );
+              })}
+            </div>
+
+            <div className="bg-white rounded-2xl border border-slate-200 p-5 mb-4">
+              <div className="text-sm font-bold text-slate-700 mb-3">🔐 Authentication</div>
+              <div className="text-xs text-slate-500 space-y-2">
+                <p>Currently using: <strong>{supabaseConfigured ? "Supabase Auth (magic link + OAuth)" : "No auth (local mode)"}</strong></p>
+                <p>To enable Google/Microsoft SSO: enable the providers in your Supabase dashboard under Authentication → Providers.</p>
+                <p>Magic link is enabled by default. Google and Microsoft require OAuth app registration.</p>
+              </div>
+            </div>
+
+            {overlays.customNote && (
+              <div className="bg-slate-50 rounded-xl p-4 text-xs text-slate-600 border border-slate-200">
+                <strong>Report footer preview:</strong> {overlays.customNote}
+              </div>
+            )}
+          </div>
+        )}
       </div>
     </div>
   );
@@ -4669,6 +4884,22 @@ export default function App() {
       {authErr&&<p className="text-red-400 text-xs font-medium">{authErr}</p>}
       <button type="submit" disabled={authLoading} className="w-full bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-500 hover:to-teal-500 disabled:opacity-50 text-white font-bold py-2.5 rounded-lg transition-all text-sm shadow">{authLoading?"Signing in…":"Sign In"}</button>
       <button type="button" onClick={()=>{setScreen("signup");setAuthErr("");}} className="w-full text-slate-400 hover:text-slate-200 text-xs py-1 transition-all">Don't have access? Request it →</button>
+      <div className="relative my-4">
+        <div className="absolute inset-0 flex items-center"><div className="w-full border-t border-slate-600"/></div>
+        <div className="relative text-center"><span className="bg-slate-800 px-2 text-xs text-slate-400">or continue with</span></div>
+      </div>
+      <div className="grid grid-cols-2 gap-2">
+        <button type="button" onClick={() => supabase.auth.signInWithOAuth({ provider: "google", options: { redirectTo: window.location.href } })}
+          className="flex items-center justify-center gap-2 border border-slate-600 rounded-lg py-2 text-sm font-medium hover:bg-slate-700 transition-colors text-slate-200">
+          <svg className="w-4 h-4" viewBox="0 0 24 24"><path fill="#4285F4" d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z"/><path fill="#34A853" d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z"/><path fill="#FBBC05" d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.07H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.93l2.85-2.22.81-.62z"/><path fill="#EA4335" d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.07l3.66 2.84c.87-2.6 3.3-4.53 6.16-4.53z"/></svg>
+          Google
+        </button>
+        <button type="button" onClick={() => supabase.auth.signInWithOAuth({ provider: "azure", options: { redirectTo: window.location.href, scopes: "email" } })}
+          className="flex items-center justify-center gap-2 border border-slate-600 rounded-lg py-2 text-sm font-medium hover:bg-slate-700 transition-colors text-slate-200">
+          <svg className="w-4 h-4" viewBox="0 0 23 23"><path fill="#f3f3f3" d="M0 0h23v23H0z"/><path fill="#f35325" d="M1 1h10v10H1z"/><path fill="#81bc06" d="M12 1h10v10H12z"/><path fill="#05a6f0" d="M1 12h10v10H1z"/><path fill="#ffba08" d="M12 12h10v10H12z"/></svg>
+          Microsoft
+        </button>
+      </div>
     </form>
   )}</ErrorBoundary>;
 }
