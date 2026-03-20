@@ -3113,7 +3113,7 @@ function MainApp({profile,onSignOut}:{profile:Profile;onSignOut:()=>void}) {
     priorFHAHAMPMonths:"0",
     canRepayWithin24Months:true, failedTPP:false,
   });
-  const [tab,setTab]=useState("results");
+  const [tab,setTab]=useState("dashboard");
   const [results,setResults]=useState(()=>{
     const demoLoan={...initLoan,loanType:"FHA",upb:"247500",originalUpb:"265000",currentEscrow:"412",currentPI:"1388",currentPITI:"1800",grossMonthlyIncome:"5200",currentInterestRate:"6.875",pmmsRate:"7.125",arrearagesToCapitalize:"7200",escrowShortage:"824",legalFees:"1150",lateFees:"285",priorPartialClaimBalance:"0",partialClaimPct:"0",noteDate:"2018-12-15",noteFirstPaymentDate:"2019-02-01",noteTerm:"360",originalMaturityDate:"2049-01-01",approvalEffectiveDate:"2025-06-01",delinquencyMonths:"4",hardshipType:"Reduction in Income",hardshipDuration:"Resolved",lienPosition:"First",occupancyStatus:"Owner Occupied",propertyCondition:"Standard",propertyDisposition:"Principal Residence",foreclosureActive:false,occupancyAbandoned:false,continuousIncome:true,borrowerIntentRetention:true,canAchieveTargetByReamort:true,currentRateAtOrBelowMarket:true,currentPITIAtOrBelowTarget:false,priorFHAHAMPMonths:"0",canRepayWithin24Months:true,failedTPP:false};
     return evaluateFHA(demoLoan);
