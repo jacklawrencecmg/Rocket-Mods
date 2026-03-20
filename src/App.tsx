@@ -208,15 +208,30 @@ const OPTION_DOCS: Record<string, {required: string[], conditional: {doc: string
     conditional: [],
     timeline: "45 days from approval"
   },
+  "FHLMC Disaster Payment Deferral": {
+    required: ["Documentation of disaster-related hardship","FEMA disaster declaration or proof of insured loss"],
+    conditional: [],
+    timeline: "45 days from approval — up to 12 months deferred; no cumulative cap applied"
+  },
+  "FHLMC Streamlined Payment Deferral": {
+    required: ["Signed Deferral Agreement"],
+    conditional: [],
+    timeline: "45 days from approval — no hardship docs or income verification required"
+  },
   "Freddie Mac Flex Modification": {
     required: ["Hardship affidavit","Verification of income (BRP)","Bank statements (2 months)","Signed Loan Modification Agreement"],
     conditional: [],
     timeline: "3-month TPP; permanent mod 45 days after"
   },
-  "Freddie Mac Streamlined Flex Modification": {
+  "Freddie Mac Flex Modification (Disaster)": {
+    required: ["Documentation of disaster-related hardship","FEMA disaster declaration or proof of insured loss","Signed Loan Modification Agreement"],
+    conditional: [],
+    timeline: "3-month TPP; permanent mod 45 days after TPP — reduced eligibility criteria apply"
+  },
+  "Freddie Mac Flex Modification (Streamlined)": {
     required: ["Signed Loan Modification Agreement"],
     conditional: [],
-    timeline: "3-month TPP; no income docs required"
+    timeline: "3-month TPP; no income docs required — streamlined path, no BRP or hardship affidavit required"
   },
   "Freddie Mac Short Sale": {
     required: ["Hardship affidavit","BRP","Listing agreement","Executed purchase contract","BPO or appraisal"],
@@ -244,15 +259,30 @@ const OPTION_DOCS: Record<string, {required: string[], conditional: {doc: string
     conditional: [],
     timeline: "45 days from approval"
   },
+  "FNMA Disaster Payment Deferral": {
+    required: ["Documentation of disaster-related hardship","FEMA disaster declaration or proof of insured loss"],
+    conditional: [],
+    timeline: "45 days from approval — up to 12 months deferred; does not count toward 12-month lifetime cap"
+  },
+  "FNMA Streamlined Payment Deferral": {
+    required: ["Signed Deferral Agreement"],
+    conditional: [],
+    timeline: "45 days from approval — no hardship docs, income verification, or borrower contact required (Campaign MODNRC solicitation path)"
+  },
   "Fannie Mae Flex Modification": {
     required: ["Hardship affidavit","Verification of income (BRP)","Bank statements (2 months)","Signed Loan Modification Agreement"],
     conditional: [],
     timeline: "3-month TPP; permanent mod 45 days after"
   },
-  "Fannie Mae Flex Modification — Streamlined": {
+  "Fannie Mae Flex Modification (Streamlined)": {
     required: ["Signed Loan Modification Agreement"],
     conditional: [],
-    timeline: "3-month TPP; no income docs required for streamlined"
+    timeline: "3-month TPP; no income docs required for streamlined — 90+ days DLQ path"
+  },
+  "Fannie Mae Flex Modification (Disaster)": {
+    required: ["Documentation of disaster-related hardship","FEMA disaster declaration or proof of insured loss","Signed Loan Modification Agreement"],
+    conditional: [],
+    timeline: "3-month TPP; permanent mod 45 days after TPP — reduced eligibility criteria apply"
   },
   "FNMA Short Sale / Mortgage Release": {
     required: ["Hardship affidavit","BRP","Listing agreement","Purchase contract","BPO or appraisal"],
@@ -301,16 +331,22 @@ const OPTION_CITATIONS: Record<string, string> = {
   "FHLMC Reinstatement": "Freddie Mac Guide §9202.2",
   "FHLMC Repayment Plan": "Freddie Mac Guide §9203.1",
   "FHLMC Payment Deferral": "Freddie Mac Guide §9204.3; Bulletin 2019-15",
+  "FHLMC Streamlined Payment Deferral": "Freddie Mac Guide §9203.4; Bulletin 2020-10",
+  "FHLMC Disaster Payment Deferral": "Freddie Mac Single-Family Guide §9203.4 (Disaster Payment Deferral)",
   "Freddie Mac Flex Modification": "Freddie Mac Guide §9206; Bulletin 2026-2",
-  "Freddie Mac Streamlined Flex Modification": "Freddie Mac Guide §9206.7",
+  "Freddie Mac Flex Modification (Disaster)": "Freddie Mac Single-Family Guide §9206.6 (Disaster Flex Modification)",
+  "Freddie Mac Flex Modification (Streamlined)": "Freddie Mac Guide §9206.7",
   "Freddie Mac Short Sale": "Freddie Mac Guide §9208; Bulletin 2026-2",
   "Freddie Mac Deed-in-Lieu": "Freddie Mac Guide §9209",
   // FNMA
   "FNMA Reinstatement": "Fannie Mae Servicing Guide D2-3.2-01",
   "FNMA Repayment Plan": "Fannie Mae Servicing Guide D2-3.2-02",
   "FNMA Payment Deferral": "Fannie Mae Servicing Guide D2-3.2-04; LL 2021-07",
+  "FNMA Disaster Payment Deferral": "Fannie Mae Servicing Guide D2-3.2-05",
+  "FNMA Streamlined Payment Deferral": "Fannie Mae Servicing Guide D2-3.2-04; Campaign MODNRC20200001 (Solicitation — No Borrower Response Required)",
   "Fannie Mae Flex Modification": "Fannie Mae Servicing Guide D2-3.2-06",
-  "Fannie Mae Flex Modification — Streamlined": "Fannie Mae Servicing Guide D2-3.2-06 (Streamlined)",
+  "Fannie Mae Flex Modification (Disaster)": "Fannie Mae Servicing Guide D2-3.2-06 (Disaster — Reduced Eligibility Criteria)",
+  "Fannie Mae Flex Modification (Streamlined)": "Fannie Mae Servicing Guide D2-3.2-06 (Streamlined — 90+ DLQ, No BRP)",
   "FNMA Short Sale / Mortgage Release": "Fannie Mae Servicing Guide D2-3.3-01",
   "FNMA Deed-in-Lieu": "Fannie Mae Servicing Guide D2-3.3-02",
   "FNMA Forbearance Plan": "Fannie Mae Servicing Guide D2-3.2-01",
@@ -331,7 +367,7 @@ const initLoan = {
   priorPartialClaimBalance:"", partialClaimPct:"",
   targetPayment:"",
   // Dates
-  originalMaturityDate:"", noteFirstPaymentDate:"", noteTerm:"",
+  originalMaturityDate:"", noteDate:"", noteFirstPaymentDate:"", noteTerm:"",
   approvalEffectiveDate:"",
   // Delinquency
   delinquencyMonths:"", delinquencyDays:"",
@@ -380,7 +416,7 @@ const initLoan = {
   usdaPriorWorkoutCompSaleFailed:false,
   usdaStep3DeferralRequired:false,
   // FNMA
-  fnmaLoanAge:"24",
+  fnmaLoanAge:"",
   fnmaPriorDeferredUPB:"0",
   fnmaPropertyType:"Principal Residence",
   fnmaHardshipResolved:false,
@@ -393,6 +429,9 @@ const initLoan = {
   fnmaPriorModCount:"0",
   fnmaFailedTPP12Months:false,
   fnmaReDefaulted12Months:false,
+  fnmaHasMI:false,
+  fnmaMIApprovalConfirmed:false,
+  fnmaSolicitationCampaign:false,
   fnmaRecourseArrangement:false,
   fnmaActiveLiquidation:false,
   fnmaActiveRepayPlan:false,
@@ -1420,22 +1459,54 @@ function calcApprovalTerms(optionName, l) {
     const currentPI_val = n(l.currentPI);
     const fhlmcDeferMonths = Math.min(dlqMonths, 6);
     const estPIForbearance = currentPI_val > 0 ? fhlmcDeferMonths * currentPI_val : null;
-    const estTotalForbearance = estPIForbearance != null ? estPIForbearance + escrowAdv : null;
+    const negEscrow = escrowAdv > 0 ? escrowAdv : (n(l.currentEscrow) < 0 ? Math.abs(n(l.currentEscrow)) : 0);
+    const estTotalForbearance = estPIForbearance != null ? estPIForbearance + negEscrow : null;
     const estNetForbearance = estTotalForbearance != null ? Math.max(0, estTotalForbearance - suspense) : null;
     return {
       "Deferred Amount (Est.)": estTotalForbearance != null ? fmt$(estTotalForbearance) : fmt$(arrears),
       "  → Est. P&I Payments Deferred": estPIForbearance != null ? `${fmt$(estPIForbearance)} (${fhlmcDeferMonths} months × ${fmt$(currentPI_val)})` : `Up to ${fhlmcDeferMonths} months`,
-      "  → Escrow Advances (servicer third-party)": escrowAdv > 0 ? fmt$(escrowAdv) : "$0.00 — enter escrow advance balance if applicable",
+      "  → Escrow Advances / Negative Escrow": negEscrow > 0 ? fmt$(negEscrow) : "$0.00 — enter escrow advance balance or negative escrow balance if applicable",
       "  → Suspense / Unapplied Funds": suspense > 0 ? `${fmt$(suspense)} offset → net ${estNetForbearance != null ? fmt$(estNetForbearance) : "N/A"}` : "$0.00",
       "  → Escrow Shortage": escShortage > 0 ? `${fmt$(escShortage)} — NOT deferred; spread over escrow analysis` : "None",
       "Cumulative Cap (Non-Disaster)": `12-month lifetime cap (non-disaster); ${n(l.fhlmcCumulativeDeferredMonths)}mo used + ${Math.min(dlqMonths, 6)}mo this deferral = ${n(l.fhlmcCumulativeDeferredMonths) + Math.min(dlqMonths, 6)}mo total; prior non-disaster deferral must be ≥ 12 months ago`,
       "Interest on Deferred Balance": "None — non-interest-bearing",
       "Deferred Balance Due": "At maturity, sale/transfer, refinance, or payoff",
-      "First Payment After Deferral": "Full contractual monthly payment",
+      "First Payment After Deferral": currentPI_val > 0 ? fmt$(currentPI_val) + " P&I — UNCHANGED" : "Full contractual monthly payment — no change",
+      "New Total Payment After Deferral": currentPI_val > 0 && escrow > 0 ? `${fmt$(currentPI_val + escrow + (escShortage > 0 ? escShortage / 60 : 0))} (P&I ${fmt$(currentPI_val)} + T&I ${fmt$(escrow)}${escShortage > 0 ? ` + shortage spread ${fmt$(escShortage/60)}/mo` : ""})` : currentPI_val > 0 ? "Enter current T&I (escrow) to compute total payment" : "Enter P&I and T&I",
       "Late Charges": "Waived upon completion",
       "Administrative Fees": "None",
       "Servicer Compensation": "$500 incentive (subject to $1,000 combined cap per mortgage)",
       "Authority": "Freddie Mac Single-Family Guide §9203.4 (02/11/26)",
+    };
+  }
+  // ── FHLMC Streamlined Payment Deferral (Solicitation) ──
+  if (opt === "FHLMC Streamlined Payment Deferral") {
+    const currentPI_val = n(l.currentPI);
+    // Streamlined: defers all payments through effective date (DLQ months + current month if effective date ≥ 1 month out)
+    // Cap at 12 months per §9203.4 solicitation provisions
+    const fhlmcStreamDeferMonths = Math.min(dlqMonths + (effDate > new Date().toISOString().split("T")[0] ? 1 : 0), 12);
+    const estPIForbearance = currentPI_val > 0 ? fhlmcStreamDeferMonths * currentPI_val : null;
+    const negEscrow = escrowAdv > 0 ? escrowAdv : (n(l.currentEscrow) < 0 ? Math.abs(n(l.currentEscrow)) : 0);
+    const estTotalForbearance = estPIForbearance != null ? estPIForbearance + negEscrow : null;
+    const estNetForbearance = estTotalForbearance != null ? Math.max(0, estTotalForbearance - suspense) : null;
+    return {
+      "Deferral Type": "Streamlined Payment Deferral — FHLMC Solicitation (no borrower contact required)",
+      "Deferred Amount (Est.)": estTotalForbearance != null ? fmt$(estTotalForbearance) : fmt$(arrears),
+      "  → Est. P&I Payments Deferred": estPIForbearance != null ? `${fmt$(estPIForbearance)} (${fhlmcStreamDeferMonths} months × ${fmt$(currentPI_val)})` : `Up to ${fhlmcStreamDeferMonths} months`,
+      "  → Deferred Escrow Advances / Negative Escrow": negEscrow > 0 ? fmt$(negEscrow) : "$0.00 — enter escrow advance balance or negative escrow balance",
+      "  → Suspense / Unapplied Funds": suspense > 0 ? `${fmt$(suspense)} offset → net ${estNetForbearance != null ? fmt$(estNetForbearance) : "N/A"}` : "$0.00",
+      "  → Escrow Shortage": escShortage > 0 ? `${fmt$(escShortage)} — spread over escrow analysis (not deferred)` : "None",
+      "Deferred Month Count Note": `DLQ months (${dlqMonths}) + month-in-progress if effective date is future = ${fhlmcStreamDeferMonths} payments; FHLMC defers all payments due through effective date`,
+      "P&I After Deferral": currentPI_val > 0 ? `${fmt$(currentPI_val)} — UNCHANGED` : "Enter current P&I",
+      "New Total Payment After Deferral": currentPI_val > 0 && escrow > 0 ? `${fmt$(currentPI_val + escrow + (escShortage > 0 ? escShortage / 60 : 0))} (P&I ${fmt$(currentPI_val)} + T&I ${fmt$(escrow)}${escShortage > 0 ? ` + shortage spread ${fmt$(escShortage/60)}/mo` : ""})` : currentPI_val > 0 ? "Enter current T&I (escrow) to compute total payment" : "Enter P&I and T&I",
+      "Post-Deferral Amortizing UPB": upb > 0 && estPIForbearance != null ? fmt$(upb - (fhlmcStreamDeferMonths * (currentPI_val - n(l.currentInterestRate)/100/12*upb))) : "Enter UPB",
+      "Non-Amortizing Deferred Balance": estTotalForbearance != null ? fmt$(estTotalForbearance) : "N/A",
+      "Cumulative Cap (Non-Disaster)": `12-month lifetime cap; ${n(l.fhlmcCumulativeDeferredMonths)}mo used + ${fhlmcStreamDeferMonths}mo this deferral = ${n(l.fhlmcCumulativeDeferredMonths) + fhlmcStreamDeferMonths}mo total`,
+      "No Hardship Documentation Required": "Streamlined solicitation — no BRP, income docs, or hardship affidavit needed",
+      "Interest on Deferred Balance": "None — non-interest-bearing",
+      "Deferred Balance Due": "At maturity, sale/transfer, refinance, or payoff",
+      "Processing Fee": "Servicer may be invoiced $500 by FHLMC upon completion",
+      "Authority": "Freddie Mac Single-Family Guide §9203.4; Bulletin 2020-10 (Streamlined Solicitation)",
     };
   }
   // ── FHLMC Disaster Payment Deferral ──
@@ -1443,12 +1514,13 @@ function calcApprovalTerms(optionName, l) {
     const currentPI_val = n(l.currentPI);
     const fhlmcDisDeferMonths = Math.min(dlqMonths, 12);
     const estPIForbearance = currentPI_val > 0 ? fhlmcDisDeferMonths * currentPI_val : null;
-    const estTotalForbearance = estPIForbearance != null ? estPIForbearance + escrowAdv : null;
+    const negEscrow = escrowAdv > 0 ? escrowAdv : (n(l.currentEscrow) < 0 ? Math.abs(n(l.currentEscrow)) : 0);
+    const estTotalForbearance = estPIForbearance != null ? estPIForbearance + negEscrow : null;
     const estNetForbearance = estTotalForbearance != null ? Math.max(0, estTotalForbearance - suspense) : null;
     return {
       "Deferred Amount (Est.)": estTotalForbearance != null ? fmt$(estTotalForbearance) : fmt$(arrears),
       "  → Est. P&I Payments Deferred": estPIForbearance != null ? `${fmt$(estPIForbearance)} (${fhlmcDisDeferMonths} months × ${fmt$(currentPI_val)})` : `Up to ${fhlmcDisDeferMonths} months`,
-      "  → Escrow Advances (servicer third-party)": escrowAdv > 0 ? fmt$(escrowAdv) : "$0.00",
+      "  → Escrow Advances / Negative Escrow": negEscrow > 0 ? fmt$(negEscrow) : "$0.00",
       "  → Suspense / Unapplied Funds": suspense > 0 ? `${fmt$(suspense)} offset → net ${estNetForbearance != null ? fmt$(estNetForbearance) : "N/A"}` : "$0.00",
       "  → Escrow Shortage": escShortage > 0 ? `${fmt$(escShortage)} — NOT deferred` : "None",
       "Disaster Nexus Required": "Eligible Disaster — FEMA-declared or insured loss event",
@@ -1685,8 +1757,9 @@ function calcApprovalTerms(optionName, l) {
     const effectiveDeferMonths = Math.min(deferMonths, cumRemaining);
     // Estimated total P&I forbearance = delinquent months × P&I (SMDU approach)
     const estPIForbearance = currentPI_val > 0 ? effectiveDeferMonths * currentPI_val : null;
-    // Total forbearance = P&I payments + escrow advances
-    const estTotalForbearance = estPIForbearance != null ? estPIForbearance + escrowAdv : null;
+    // Total forbearance = P&I payments + escrow advances/negative escrow (whichever is populated)
+    const negEscrow = escrowAdv > 0 ? escrowAdv : (n(l.currentEscrow) < 0 ? Math.abs(n(l.currentEscrow)) : 0);
+    const estTotalForbearance = estPIForbearance != null ? estPIForbearance + negEscrow : null;
     // Net deferred amount after any suspense/unapplied funds offset
     const estNetForbearance = estTotalForbearance != null ? Math.max(0, estTotalForbearance - suspense) : null;
     // Post-workout UPB = UPB minus the principal component of deferred P&I payments
@@ -1708,12 +1781,13 @@ function calcApprovalTerms(optionName, l) {
       "  → Est. Deferred P&I": estPIForbearance != null ? `${fmt$(estPIForbearance)} (${effectiveDeferMonths} months × ${fmt$(currentPI_val)})` : "Enter current P&I",
       "  → Est. Deferred Principal": hasPI ? fmt$(estDeferredPrincipal) : "Enter P&I and rate",
       "  → Est. Deferred Interest": hasPI && estDeferredInterest != null ? fmt$(estDeferredInterest) : "Enter P&I and rate",
-      "  → Escrow Advances Deferred": escrowAdv > 0 ? fmt$(escrowAdv) : "$0.00 — enter escrow advance balance if applicable",
+      "  → Escrow Advances / Negative Escrow Deferred": negEscrow > 0 ? fmt$(negEscrow) : "$0.00 — enter escrow advance balance or negative escrow if applicable",
       "  → Suspense / Unapplied Funds": suspense > 0 ? `${fmt$(suspense)} offset → net forbearance ${estNetForbearance != null ? fmt$(estNetForbearance) : "N/A"}` : "$0.00",
       "  → Months Deferred": `${effectiveDeferMonths} months (DLQ: ${deferMonths}mo; cap remaining: ${cumRemaining}mo)`,
       "  → Escrow Shortage": escShortage > 0 ? `${fmt$(escShortage)} — repaid over 60-month escrow analysis (NOT deferred)` : "None",
       "Post-Workout UPB (Est.)": hasPI ? fmt$(estPostWorkoutUPB) : "Enter P&I and rate",
       "P&I Payment After Deferral": currentPI_val > 0 ? `${fmt$(currentPI_val)} — UNCHANGED (no modification to rate, term, or payment)` : "Full contractual monthly payment — no change",
+      "New Total Payment After Deferral": currentPI_val > 0 && escrow > 0 ? `${fmt$(currentPI_val + escrow + (escShortage > 0 ? escShortage / 60 : 0))} (P&I ${fmt$(currentPI_val)} + T&I ${fmt$(escrow)}${escShortage > 0 ? ` + shortage spread ${fmt$(escShortage/60)}/mo` : ""})` : currentPI_val > 0 ? "Enter current T&I (escrow) to compute total payment" : "Enter P&I and T&I",
       "Cumulative Cap": `${cumUsed} months used → ${cumulativeAfter} after this deferral / 12-month lifetime cap (disaster deferrals excluded)`,
       "Interest on Deferred Balance": "None — non-interest-bearing balance",
       "Deferred Balance Due": "At maturity, sale/transfer, refinance, or payoff of interest-bearing UPB",
@@ -1722,17 +1796,63 @@ function calcApprovalTerms(optionName, l) {
       "Authority": "Fannie Mae Servicing Guide D2-3.2-04 (08/13/2025)",
     };
   }
+  // ── FNMA Streamlined Payment Deferral (Solicitation) ──
+  if (opt === "FNMA Streamlined Payment Deferral") {
+    const currentPI_val = n(l.currentPI);
+    const deferMonths = Math.min(n(l.delinquencyMonths), 6);
+    const cumUsed = n(l.fnmaCumulativeDeferredMonths);
+    const cumRemaining = Math.max(0, 12 - cumUsed);
+    const effectiveDeferMonths = Math.min(deferMonths, cumRemaining);
+    const estPIForbearance = currentPI_val > 0 ? effectiveDeferMonths * currentPI_val : null;
+    const negEscrow = escrowAdv > 0 ? escrowAdv : (n(l.currentEscrow) < 0 ? Math.abs(n(l.currentEscrow)) : 0);
+    const estTotalForbearance = estPIForbearance != null ? estPIForbearance + negEscrow : null;
+    const estNetForbearance = estTotalForbearance != null ? Math.max(0, estTotalForbearance - suspense) : null;
+    const monthlyRate = currentRate > 0 ? currentRate / 100 / 12 : 0;
+    let estDeferredPrincipal = 0;
+    let runningUPB = upb;
+    for (let i = 0; i < effectiveDeferMonths; i++) {
+      const intPortion = runningUPB * monthlyRate;
+      const prinPortion = currentPI_val > 0 ? Math.max(0, currentPI_val - intPortion) : 0;
+      estDeferredPrincipal += prinPortion;
+      runningUPB -= prinPortion;
+    }
+    const estDeferredInterest = estPIForbearance != null ? estPIForbearance - estDeferredPrincipal : null;
+    const estPostWorkoutUPB = upb - estDeferredPrincipal;
+    const cumulativeAfter = cumUsed + effectiveDeferMonths;
+    const hasPI = currentPI_val > 0 && currentRate > 0;
+    return {
+      "Solicitation Path": "Campaign MODNRC — No borrower response required (LM.R1452: BRP not required; LM.R1447: Campaign MODNRC20200001)",
+      "Deferred Amount — Est. Total Forbearance": estTotalForbearance != null ? fmt$(estTotalForbearance) : "Enter current P&I",
+      "  → Est. Deferred P&I": estPIForbearance != null ? `${fmt$(estPIForbearance)} (${effectiveDeferMonths} months × ${fmt$(currentPI_val)})` : "Enter current P&I",
+      "  → Est. Deferred Principal": hasPI ? fmt$(estDeferredPrincipal) : "Enter P&I and rate",
+      "  → Est. Deferred Interest": hasPI && estDeferredInterest != null ? fmt$(estDeferredInterest) : "Enter P&I and rate",
+      "  → Escrow Advances / Negative Escrow Deferred": negEscrow > 0 ? fmt$(negEscrow) : "$0.00 — enter escrow advance balance or negative escrow if applicable",
+      "  → Suspense / Unapplied Funds": suspense > 0 ? `${fmt$(suspense)} offset → net forbearance ${estNetForbearance != null ? fmt$(estNetForbearance) : "N/A"}` : "$0.00",
+      "  → Months Deferred": `${effectiveDeferMonths} months (DLQ: ${deferMonths}mo; cap remaining: ${cumRemaining}mo)`,
+      "  → Escrow Shortage": escShortage > 0 ? `${fmt$(escShortage)} — repaid over 60-month escrow analysis (NOT deferred)` : "None",
+      "Post-Workout UPB (Est.)": hasPI ? fmt$(estPostWorkoutUPB) : "Enter P&I and rate",
+      "P&I Payment After Deferral": currentPI_val > 0 ? `${fmt$(currentPI_val)} — UNCHANGED (no modification to rate, term, or payment)` : "Full contractual monthly payment — no change",
+      "New Total Payment After Deferral": currentPI_val > 0 && escrow > 0 ? `${fmt$(currentPI_val + escrow + (escShortage > 0 ? escShortage / 60 : 0))} (P&I ${fmt$(currentPI_val)} + T&I ${fmt$(escrow)}${escShortage > 0 ? ` + shortage spread ${fmt$(escShortage/60)}/mo` : ""})` : currentPI_val > 0 ? "Enter current T&I (escrow) to compute total payment" : "Enter P&I and T&I",
+      "Cumulative Cap": `${cumUsed} months used → ${cumulativeAfter} after this deferral / 12-month lifetime cap (disaster deferrals excluded)`,
+      "Interest on Deferred Balance": "None — non-interest-bearing balance",
+      "Deferred Balance Due": "At maturity, sale/transfer, refinance, or payoff of interest-bearing UPB",
+      "Late Charges": "All waived upon completion",
+      "Post-Deferral Default Risk": "If 60-day DLQ within 6 months → evaluate for Flex Modification by 75th DLQ day",
+      "Authority": "Fannie Mae Servicing Guide D2-3.2-04; Campaign MODNRC20200001 — Solicitation, No Borrower Response Required",
+    };
+  }
   // ── FNMA Disaster Payment Deferral ──
   if (opt === "FNMA Disaster Payment Deferral") {
     const currentPI_val = n(l.currentPI);
     const deferMonths = Math.min(n(l.delinquencyMonths), 12);
     const estPIForbearance = currentPI_val > 0 ? deferMonths * currentPI_val : null;
-    const estTotalForbearance = estPIForbearance != null ? estPIForbearance + escrowAdv : null;
+    const negEscrow = escrowAdv > 0 ? escrowAdv : (n(l.currentEscrow) < 0 ? Math.abs(n(l.currentEscrow)) : 0);
+    const estTotalForbearance = estPIForbearance != null ? estPIForbearance + negEscrow : null;
     const estNetForbearance = estTotalForbearance != null ? Math.max(0, estTotalForbearance - suspense) : null;
     return {
       "Deferred Amount (Est.)": estTotalForbearance != null ? fmt$(estTotalForbearance) : fmt$(arrears),
       "  → Est. P&I Payments Deferred": estPIForbearance != null ? `${fmt$(estPIForbearance)} (${deferMonths} months × ${fmt$(currentPI_val)})` : `Up to ${deferMonths} months`,
-      "  → Escrow Advances Deferred": escrowAdv > 0 ? fmt$(escrowAdv) : "$0.00",
+      "  → Escrow Advances / Negative Escrow Deferred": negEscrow > 0 ? fmt$(negEscrow) : "$0.00",
       "  → Suspense / Unapplied Funds": suspense > 0 ? `${fmt$(suspense)} offset → net ${estNetForbearance != null ? fmt$(estNetForbearance) : "N/A"}` : "$0.00",
       "  → Escrow Shortage": escShortage > 0 ? `${fmt$(escShortage)} — repaid over 60-month escrow analysis (NOT deferred)` : "None",
       "vs. Standard Payment Deferral": "Disaster: up to 12mo deferred; 1–12mo DLQ eligible; no 12-month cumulative cap applied",
@@ -1762,16 +1882,27 @@ function calcApprovalTerms(optionName, l) {
     const preliminaryRate = isARM && fullyIndexedRate != null ? Math.min(currentRate, fullyIndexedRate) : currentRate;
     // Escrow shortage 60-month spread (per D2-3.2-06: spread over escrow analysis, not capitalized)
     const escShortageMonthlySpread = escShortage > 0 ? escShortage / 60 : 0;
-    const floorRate = pmms > 0 ? Math.max(pmms - 0.50, 4.625) : 4.625;
-    // Rate can only be REDUCED — never increased. If current rate < floor, rate stays at current.
-    const effectiveRate = currentRate > 0 ? Math.min(floorRate, currentRate) : floorRate;
-    const rateAtFloor = currentRate > 0 && currentRate <= floorRate;
+    // FNMA modification rate = PMMS rounded to nearest 0.125% (min 4.625%) — published weekly by FNMA
+    const fnmaModRate = pmms > 0 ? Math.max(Math.round(pmms / 0.125) * 0.125, 4.625) : 4.625;
+    // For ARMs: mandatory product conversion to FRM at FNMA mod rate (LM.R1108; can exceed current ARM rate)
+    // For FRMs: rate can only be REDUCED — cap at current rate
+    const effectiveRate = isARM ? fnmaModRate : (currentRate > 0 ? Math.min(fnmaModRate, currentRate) : fnmaModRate);
+    const rateAtFloor = !isARM && currentRate > 0 && currentRate <= fnmaModRate;
     // Step 1: Re-amortize at preliminary rate for remaining term (for ARMs: lower of note rate / fully-indexed rate)
     const step1PI = remainingTerm && preliminaryRate > 0 && flexNewUPB > 0 ? calcMonthlyPI(flexNewUPB, preliminaryRate, remainingTerm) : null;
-    // Step 2: Rate reduced to effective rate (min of floor and current), same remaining term
+    // Step 2: ARM converts to FRM at fnmaModRate / FRM rate reduced to fnmaModRate floor, same remaining term
     const step2PI = remainingTerm && effectiveRate > 0 && flexNewUPB > 0 ? calcMonthlyPI(flexNewUPB, effectiveRate, remainingTerm) : null;
-    // Step 3: Extend term to 480 months at effective rate
-    const step3PI = effectiveRate > 0 && flexNewUPB > 0 ? calcMonthlyPI(flexNewUPB, effectiveRate, 480) : null;
+    // Step 3: Extend term in minimum 1-month increments until 20% target achieved (D2-3.2-06)
+    // Per guide: extend until P&I ≤ target — do NOT automatically go to 480; use minimum needed term
+    // Analytical solution: n = ceil(ln(target / (target - UPB×r)) / ln(1+r)), capped at 480
+    const _tgt3 = currentPI_val > 0 ? currentPI_val * 0.80 : null;
+    const _r3 = effectiveRate > 0 ? effectiveRate / 100 / 12 : 0;
+    let step3Term = 480;
+    if (_r3 > 0 && flexNewUPB > 0 && _tgt3 != null && _tgt3 > flexNewUPB * _r3) {
+      const _minN = Math.ceil(Math.log(_tgt3 / (_tgt3 - flexNewUPB * _r3)) / Math.log(1 + _r3));
+      step3Term = Math.min(480, Math.max(_minN, (remainingTerm || 360) + 1));
+    }
+    const step3PI = effectiveRate > 0 && flexNewUPB > 0 ? calcMonthlyPI(flexNewUPB, effectiveRate, step3Term) : null;
     // Target: 20% reduction from pre-mod P&I
     const targetPI20 = currentPI_val > 0 ? currentPI_val * 0.80 : null;
     // Step 4: Principal Forbearance — applied when steps 1–3 fail to achieve 20% reduction
@@ -1795,8 +1926,8 @@ function calcApprovalTerms(optionName, l) {
       stepApplied = rateAtFloor ? "Step 2: Rate stays at current (already at/below floor) — 20% target met" : "Step 2: Rate reduced to floor rate — 20% target met";
       achievedRate = effectiveRate; achievedTerm = remainingTerm || 360; achievedPI = step2PI;
     } else if (step3PI != null && targetPI20 != null && step3PI <= targetPI20) {
-      stepApplied = "Step 3: Term extended to 480 months — 20% target met";
-      achievedRate = effectiveRate; achievedTerm = 480; achievedPI = step3PI;
+      stepApplied = `Step 3: Term extended to ${step3Term} months (minimum needed) — 20% target met`;
+      achievedRate = effectiveRate; achievedTerm = step3Term; achievedPI = step3PI;
     } else if (step4PI != null) {
       achievedRate = effectiveRate; achievedTerm = 480;
       appliedForbearance = principalForbearance ?? 0;
@@ -1813,10 +1944,8 @@ function calcApprovalTerms(optionName, l) {
     }
     const achievedPITI = achievedPI != null ? achievedPI + escrow + escShortageMonthlySpread : null;
     const piReductionPct = currentPI_val > 0 && achievedPI != null ? (currentPI_val - achievedPI) / currentPI_val * 100 : null;
-    // Per D2-3.2-06: 480-month term is measured from the modified loan's first payment due date
-    const newMat480 = addMonths(newFirstPmt, 480);
-    const newMatStd = addMonths(effDate, achievedTerm);
-    const newMaturity = achievedTerm === 480 ? newMat480 : newMatStd;
+    // Per D2-3.2-06: term is measured from the modified loan's first payment due date
+    const newMaturity = addMonths(newFirstPmt, achievedTerm);
     const tppMonths = dlqMonths >= 1 ? "3-month TPP (31+ days DLQ)" : "4-month TPP (current or <31 DLQ)";
     return {
       "Modification Type": `Fannie Mae Flex Modification${opt.includes("Streamlined") ? " (Streamlined — No BRP/Hardship Doc Required)" : opt.includes("Disaster") ? " (Disaster)" : ""} — ${isARM ? "Adjustable Rate Mortgage (ARM)" : "Fixed Rate"}`,
@@ -1835,8 +1964,8 @@ function calcApprovalTerms(optionName, l) {
         "ARM Fully-Indexed Rate (nearest 0.125%)": fullyIndexedRate != null ? fmtPct(fullyIndexedRate) : "Enter index and margin",
         "Step 1 Preliminary Rate": fmtPct(preliminaryRate) + (isARM && fullyIndexedRate != null && fullyIndexedRate < currentRate ? " (fully-indexed rate — lower than note rate)" : " (current note rate — lower than fully-indexed)"),
       } : { "Loan Type": "Fixed Rate Mortgage" }),
-      "Floor Rate (PMMS−50bps, min 4.625%)": pmms > 0 ? fmtPct(floorRate) : "Enter PMMS rate",
-      "Rate Note": rateAtFloor && currentRate > 0 ? `Current rate ${fmtPct(currentRate)} is at or below floor — rate stays unchanged (rate can only be reduced, not increased)` : `Current rate ${currentRate > 0 ? fmtPct(currentRate) : "N/A"} → reduced to floor if needed`,
+      "FNMA Modification Rate (PMMS, nearest 0.125%)": pmms > 0 ? fmtPct(fnmaModRate) : "Enter PMMS rate",
+      "Rate Note": isARM ? `ARM converts to FRM at FNMA mod rate ${fmtPct(fnmaModRate)} (LM.R1108 — mandatory product conversion)` : (rateAtFloor && currentRate > 0 ? `Current rate ${fmtPct(currentRate)} is at or below floor — rate stays unchanged` : `Current rate ${currentRate > 0 ? fmtPct(currentRate) : "N/A"} → reduced to FNMA mod rate if above floor`),
       "New Interest Rate": achievedRate > 0 ? fmtPct(achievedRate) : "N/A",
       "New Term": achievedTerm ? `${achievedTerm} months (${(achievedTerm/12).toFixed(1)} years)` : "N/A",
       "Principal Forbearance (Step 4)": appliedForbearance > 0 ? `${fmt$(appliedForbearance)} — non-interest-bearing; due at payoff/sale/maturity/refinance` : "Not required (target met in Steps 1–3)",
@@ -1851,7 +1980,7 @@ function calcApprovalTerms(optionName, l) {
       "P&I Reduction": piReductionPct != null ? `${piReductionPct.toFixed(1)}% (${fmt$(currentPI_val)} → ${fmt$(achievedPI)})` : "Enter current P&I",
       "P&I Reduction ≥ 20%?": piReductionPct != null ? (piReductionPct >= 20 ? `✅ Yes — ${piReductionPct.toFixed(1)}%` : `❌ No — ${piReductionPct.toFixed(1)}%`) : "Enter current P&I",
       "New Maturity Date": fmtDate(newMaturity),
-      "  → Maturity Basis": achievedTerm === 480 ? "480 months from modified first payment date (D2-3.2-06)" : "Re-amortized over remaining loan term",
+      "  → Maturity Basis": `${achievedTerm} months from modified first payment date (D2-3.2-06)${achievedTerm < 480 ? " — minimum term needed; full 480-month extension not required" : ""}`,
       "New First Payment Date": fmtDate(newFirstPmt),
       "Trial Period Plan": tppMonths,
       "Escrow Shortage": escShortage > 0 ? `${fmt$(escShortage)} — spread over 60-month escrow analysis (not capitalized)` : "None",
@@ -2050,7 +2179,8 @@ function evaluateUSDA(l) {
   // 1c: auto-compute usdaPaymentsMade12 (loan age >= 12 months)
   const _usdaToday = new Date().toISOString().split("T")[0];
   const _usdaEff = l.approvalEffectiveDate || _usdaToday;
-  const _usdaLoanAge = l.noteFirstPaymentDate ? monthsBetween(l.noteFirstPaymentDate, _usdaEff) : null;
+  const _usdaAgeSrc = l.noteDate || l.noteFirstPaymentDate;
+  const _usdaLoanAge = _usdaAgeSrc ? monthsBetween(_usdaAgeSrc, _usdaEff) : null;
   const usdaPayments12 = _usdaLoanAge !== null ? _usdaLoanAge >= 12 : l.usdaPaymentsMade12;
   // 1g: auto-compute usdaForbearancePeriodLt12 and usdaTotalDLQLt12
   const usdaFbLt12 = dlqM > 0 ? dlqM < 12 : l.usdaForbearancePeriodLt12;
@@ -2181,7 +2311,8 @@ function evaluateFHLMC(l) {
   const dlq = n(l.delinquencyMonths);
   const _todayFHLMC = new Date().toISOString().split("T")[0];
   const _fhlmcEff = l.approvalEffectiveDate || _todayFHLMC;
-  const _fhlmcAutoAge = l.noteFirstPaymentDate ? monthsBetween(l.noteFirstPaymentDate, _fhlmcEff) : null;
+  const _fhlmcAgeSrc = l.noteDate || l.noteFirstPaymentDate;
+  const _fhlmcAutoAge = _fhlmcAgeSrc ? monthsBetween(_fhlmcAgeSrc, _fhlmcEff) : null;
   const loanAge = _fhlmcAutoAge !== null ? _fhlmcAutoAge : n(l.fhlmcLoanAge);
   const priorMods = n(l.fhlmcPriorModCount);
   const dlqAtDisaster = n(l.fhlmcDLQAtDisaster);
@@ -2259,6 +2390,29 @@ function evaluateFHLMC(l) {
       node("No unexpired offer for another workout option", l.fhlmcUnexpiredOffer?"Yes":"No", noUnexpiredOffer),
     ];
     results.push({ option:"FHLMC Payment Deferral", eligible:nodes.every(nd=>nd.pass), nodes });
+  }
+  // ── 2b. FHLMC Streamlined Payment Deferral (Solicitation) ───────────────────
+  // No hardship resolution, income verification, or borrower contact required
+  // FHLMC proactively identifies eligible loans for solicitation (Bulletin 2020-10; §9203.4)
+  {
+    const eligDlqRange = dlq >= 2 && dlq <= 24;
+    const eligLoanAge = loanAge >= 12;
+    const fhlmcCumDeferred = n(l.fhlmcCumulativeDeferredMonths);
+    const fhlmcPriorDeferral = n(l.fhlmcPriorDeferralMonths);
+    const eligCumCap = fhlmcCumDeferred < 12;
+    const eligPriorDeferral = fhlmcPriorDeferral === 0 || fhlmcPriorDeferral >= 12;
+    const nodes = [
+      node("Non-disaster hardship", l.hardshipType, !isDisaster),
+      node("Conventional 1st lien", l.lienPosition, isConventional && isFirstLien),
+      node("Loan age ≥ 12 months", loanAge+"mo", eligLoanAge),
+      node("DLQ 2–24 months (streamlined solicitation range)", dlq+"mo", eligDlqRange),
+      node("Cumulative deferred months < 12 (lifetime, non-disaster)", fhlmcCumDeferred+"mo", eligCumCap),
+      node("Prior non-disaster deferral ≥ 12 months ago (or never)", fhlmcPriorDeferral===0?"None":fhlmcPriorDeferral+"mo ago", eligPriorDeferral),
+      node("No approved liquidation option active", l.fhlmcApprovedLiquidationOption?"Active":"None", noActiveLiquidation),
+      node("No active/performing TPP", l.fhlmcActiveTPP?"Active":"None", noActiveTPP),
+      node("No unexpired offer for another workout option", l.fhlmcUnexpiredOffer?"Yes":"No", noUnexpiredOffer),
+    ];
+    results.push({ option:"FHLMC Streamlined Payment Deferral", eligible:nodes.every(nd=>nd.pass), nodes, note:"No hardship resolution, income verification, or borrower contact required — FHLMC proactive solicitation (Bulletin 2020-10; §9203.4)" });
   }
   // ── 3. Disaster Payment Deferral ─────────────────────────────────────────────
   {
@@ -2385,7 +2539,8 @@ function evaluateFNMA(l) {
   const dlq = n(l.delinquencyMonths);
   const _today = new Date().toISOString().split("T")[0];
   const _fnmaEff = l.approvalEffectiveDate || _today;
-  const _fnmaAutoAge = l.noteFirstPaymentDate ? monthsBetween(l.noteFirstPaymentDate, _fnmaEff) : null;
+  const _fnmaAgeSrc = l.noteDate || l.noteFirstPaymentDate;
+  const _fnmaAutoAge = _fnmaAgeSrc ? monthsBetween(_fnmaAgeSrc, _fnmaEff) : null;
   const loanAge = _fnmaAutoAge !== null ? _fnmaAutoAge : n(l.fnmaLoanAge);
   // 1a: auto-compute fnmaWithin36MonthsMaturity
   const _fnmaOrigMat = l.originalMaturityDate || (l.noteFirstPaymentDate && l.noteTerm ? calcOriginalMaturity(l.noteFirstPaymentDate, l.noteTerm) : null);
@@ -2416,10 +2571,14 @@ function evaluateFNMA(l) {
   // ── 0. Reinstatement ─────────────────────────────────────────────────────────
   {
     const hasArrears = n(l.arrearagesToCapitalize) > 0 || dlq > 0;
+    // LM.R1304: If no liquid assets reported, reinstatement is not appropriate
+    const assetsEntered = l.cashReservesAmount !== "" && l.cashReservesAmount !== null;
+    const hasLiquidAssets = !assetsEntered || fnmaCash > 0;
     const nodes = [
       node("Past-due amounts exist", dlq+"mo DLQ", hasArrears),
+      ...(assetsEntered ? [node("Borrower has liquid assets for lump-sum payment (LM.R1304)", fnmaCash > 0 ? fmt$(fnmaCash) : "No assets reported", hasLiquidAssets)] : []),
     ];
-    results.push({ option:"FNMA Reinstatement", eligible:hasArrears, nodes, note:"Borrower pays all past-due P&I, escrow, fees, and charges to restore current status" });
+    results.push({ option:"FNMA Reinstatement", eligible:hasArrears && hasLiquidAssets, nodes, note:"Borrower pays all past-due P&I, escrow, fees, and charges to restore current status" });
   }
   // ── 1. Forbearance Plan (D2-3.2-01) ──────────────────────────────────────────
   {
@@ -2468,6 +2627,30 @@ function evaluateFNMA(l) {
     ];
     results.push({ option:"FNMA Payment Deferral", eligible:nodes.every(nd=>nd.pass), nodes });
   }
+  // ── 3b. FNMA Streamlined Payment Deferral (Solicitation — Campaign MODNRC) ────
+  {
+    const eligLienPos = l.lienPosition === "First";
+    const eligLoanAge = loanAge >= 12;
+    const eligDlqRange = dlq >= 2 && dlq <= 6;
+    const eligCumCap = cumulativeDeferred < 12;
+    const eligPriorDeferral = priorDeferralMonths === 0 || priorDeferralMonths >= 12;
+    const eligNotNearMaturity = !fnmaWithin36Mo;
+    const eligNoFailedTPP = !l.fnmaFailedTPP12Months;
+    const eligSolicitation = l.fnmaSolicitationCampaign;
+    const nodes = [
+      node("Non-disaster hardship", l.hardshipType, !isDisaster),
+      node("Conventional 1st lien", l.lienPosition, eligLienPos),
+      node("Loan age ≥ 12 months", loanAge+"mo", eligLoanAge),
+      node("DLQ 2–6 months at evaluation", dlq+"mo", eligDlqRange),
+      node("Servicer solicitation campaign active (LM.R1447 — Campaign MODNRC; BRP not required per LM.R1452)", l.fnmaSolicitationCampaign?"Active":"None", eligSolicitation),
+      node("Cumulative deferred months < 12 (lifetime, non-disaster)", cumulativeDeferred+"mo", eligCumCap),
+      node("Prior non-disaster deferral ≥ 12 months ago (or never)", priorDeferralMonths===0?"None":priorDeferralMonths+"mo ago", eligPriorDeferral),
+      node("Not within 36 months of maturity", fnmaWithin36Mo?"Within 36mo":"OK", eligNotNearMaturity),
+      node("No failed Flex Mod TPP within 12 months", l.fnmaFailedTPP12Months?"Yes":"No", eligNoFailedTPP),
+      ...commonBlockers,
+    ];
+    results.push({ option:"FNMA Streamlined Payment Deferral", eligible:nodes.every(nd=>nd.pass), nodes, note:"No hardship resolution, income verification, or borrower contact required — FNMA proactive solicitation (Campaign MODNRC; D2-3.2-04; LM.R1452: BRP not required)" });
+  }
   // ── 4. Disaster Payment Deferral (D2-3.2-05) ─────────────────────────────────
   {
     const eligDisaster = l.fnmaDisasterHardship;
@@ -2510,6 +2693,7 @@ function evaluateFNMA(l) {
       node("Prior modifications < 3 (payment deferrals excluded)", priorModCount, eligPriorMods),
       node("No failed Flex Mod TPP within 12 months", l.fnmaFailedTPP12Months?"Yes":"No", eligNoFailedTPP),
       node("No 60-day re-default within 12mo of last Flex Mod", l.fnmaReDefaulted12Months?"Yes":"No", eligNoReDefault),
+      ...(l.fnmaHasMI ? [node("MI/PMI insurer approval confirmed (LM.R1074)", l.fnmaMIApprovalConfirmed?"Confirmed":"Not confirmed", l.fnmaMIApprovalConfirmed, "Servicer must obtain prior written approval from MI insurer if insurer lacks FNMA delegated authority")] : []),
       ...commonBlockers,
     ];
     results.push({ option:"Fannie Mae Flex Modification", eligible:nodes.every(nd=>nd.pass), nodes });
@@ -2523,14 +2707,17 @@ function evaluateFNMA(l) {
     const eligPriorMods = priorModCount < 3;
     const eligNoFailedTPP = !l.fnmaFailedTPP12Months;
     const eligNoReDefault = !l.fnmaReDefaulted12Months;
+    const eligNotNearMaturity = !fnmaWithin36Mo;
     const nodes = [
       node("Non-disaster hardship", l.hardshipType, !isDisaster),
       node("Conventional 1st lien", l.lienPosition, eligLienPos),
       node("Loan age ≥ 12 months", loanAge+"mo", eligLoanAge),
       node("≥ 90 days (3 months) DLQ", dlq+"mo", eligDLQ),
+      node("Not within 36 months of maturity", fnmaWithin36Mo?"Within 36mo":"OK", eligNotNearMaturity),
       node("Prior modifications < 3 (payment deferrals excluded)", priorModCount, eligPriorMods),
       node("No failed Flex Mod TPP within 12 months", l.fnmaFailedTPP12Months?"Yes":"No", eligNoFailedTPP),
       node("No 60-day re-default within 12mo of last Flex Mod", l.fnmaReDefaulted12Months?"Yes":"No", eligNoReDefault),
+      ...(l.fnmaHasMI ? [node("MI/PMI insurer approval confirmed (LM.R1074)", l.fnmaMIApprovalConfirmed?"Confirmed":"Not confirmed", l.fnmaMIApprovalConfirmed, "Servicer must obtain prior written approval from MI insurer if insurer lacks FNMA delegated authority")] : []),
       ...commonBlockers,
     ];
     results.push({ option:"Fannie Mae Flex Modification (Streamlined)", eligible:nodes.every(nd=>nd.pass), nodes, note:"No BRP, hardship documentation, or income verification required — 90+ days DLQ path per D2-3.2-06" });
@@ -2607,17 +2794,25 @@ const WATERFALL_ORDER = {
     "FHLMC Reinstatement",
     "FHLMC Repayment Plan",
     "FHLMC Payment Deferral",
+    "FHLMC Streamlined Payment Deferral",
     "FHLMC Disaster Payment Deferral",
     "Freddie Mac Flex Modification",
     "Freddie Mac Flex Modification (Streamlined)",
+    "Freddie Mac Flex Modification (Disaster)",
+    "Freddie Mac Short Sale",
+    "Freddie Mac Deed-in-Lieu",
   ],
   FNMA: [
     "FNMA Reinstatement",
     "FNMA Repayment Plan",
     "FNMA Payment Deferral",
+    "FNMA Streamlined Payment Deferral",
     "FNMA Disaster Payment Deferral",
     "Fannie Mae Flex Modification",
     "Fannie Mae Flex Modification (Streamlined)",
+    "Fannie Mae Flex Modification (Disaster)",
+    "Fannie Mae Short Sale",
+    "Fannie Mae Mortgage Release (DIL)",
   ],
 };
 
@@ -2856,7 +3051,7 @@ const FIELD_MAP: Record<string, string|null> = {
   "loan_type": "loanType",
   "PropertyType": "propertyDisposition",
   "OccupancyType": "occupancyStatus",
-  "NoteDate": "noteFirstPaymentDate",
+  "NoteDate": "noteDate",
   "first_payment_date": "noteFirstPaymentDate",
   "MaturityDate": "originalMaturityDate",
   "OriginalTerm": "noteTerm",
@@ -2904,7 +3099,7 @@ function MainApp({profile,onSignOut}:{profile:Profile;onSignOut:()=>void}) {
     pmmsRate:"7.125", arrearagesToCapitalize:"7200", escrowShortage:"824",
     legalFees:"1150", lateFees:"285", priorPartialClaimBalance:"0",
     partialClaimPct:"0", targetPayment:"",
-    noteFirstPaymentDate:"2019-02-01", noteTerm:"360",
+    noteDate:"2018-12-15", noteFirstPaymentDate:"2019-02-01", noteTerm:"360",
     originalMaturityDate:"2049-01-01",
     approvalEffectiveDate:"2025-06-01",
     delinquencyMonths:"4", hardshipType:"Reduction in Income",
@@ -2920,7 +3115,7 @@ function MainApp({profile,onSignOut}:{profile:Profile;onSignOut:()=>void}) {
   });
   const [tab,setTab]=useState("results");
   const [results,setResults]=useState(()=>{
-    const demoLoan={...initLoan,loanType:"FHA",upb:"247500",originalUpb:"265000",currentEscrow:"412",currentPI:"1388",currentPITI:"1800",grossMonthlyIncome:"5200",currentInterestRate:"6.875",pmmsRate:"7.125",arrearagesToCapitalize:"7200",escrowShortage:"824",legalFees:"1150",lateFees:"285",priorPartialClaimBalance:"0",partialClaimPct:"0",noteFirstPaymentDate:"2019-02-01",noteTerm:"360",originalMaturityDate:"2049-01-01",approvalEffectiveDate:"2025-06-01",delinquencyMonths:"4",hardshipType:"Reduction in Income",hardshipDuration:"Resolved",lienPosition:"First",occupancyStatus:"Owner Occupied",propertyCondition:"Standard",propertyDisposition:"Principal Residence",foreclosureActive:false,occupancyAbandoned:false,continuousIncome:true,borrowerIntentRetention:true,canAchieveTargetByReamort:true,currentRateAtOrBelowMarket:true,currentPITIAtOrBelowTarget:false,priorFHAHAMPMonths:"0",canRepayWithin24Months:true,failedTPP:false};
+    const demoLoan={...initLoan,loanType:"FHA",upb:"247500",originalUpb:"265000",currentEscrow:"412",currentPI:"1388",currentPITI:"1800",grossMonthlyIncome:"5200",currentInterestRate:"6.875",pmmsRate:"7.125",arrearagesToCapitalize:"7200",escrowShortage:"824",legalFees:"1150",lateFees:"285",priorPartialClaimBalance:"0",partialClaimPct:"0",noteDate:"2018-12-15",noteFirstPaymentDate:"2019-02-01",noteTerm:"360",originalMaturityDate:"2049-01-01",approvalEffectiveDate:"2025-06-01",delinquencyMonths:"4",hardshipType:"Reduction in Income",hardshipDuration:"Resolved",lienPosition:"First",occupancyStatus:"Owner Occupied",propertyCondition:"Standard",propertyDisposition:"Principal Residence",foreclosureActive:false,occupancyAbandoned:false,continuousIncome:true,borrowerIntentRetention:true,canAchieveTargetByReamort:true,currentRateAtOrBelowMarket:true,currentPITIAtOrBelowTarget:false,priorFHAHAMPMonths:"0",canRepayWithin24Months:true,failedTPP:false};
     return evaluateFHA(demoLoan);
   });
   const [evaluated,setEvaluated]=useState(true);
@@ -4109,7 +4304,8 @@ CREATE POLICY "Users see own versions" ON evaluation_versions FOR ALL USING (aut
             <div className="bg-white rounded-2xl shadow-sm border border-slate-200 p-5 overflow-y-auto" style={{maxHeight:"82vh"}}>
               <Sec title="📅 Loan Dates">
                 <div className="flex items-center gap-1 mb-1"><SrcBadge type="los"/><span className="text-[10px] text-slate-400 ml-1">Pull from servicing system</span></div>
-                <DateInput label="Note First Payment Date" value={loan.noteFirstPaymentDate} onChange={v=>set("noteFirstPaymentDate",v)}/>
+                <DateInput label="Note Date (Origination / Closing Date — for loan age)" value={loan.noteDate} onChange={v=>set("noteDate",v)}/>
+                <DateInput label="Note First Payment Date (for remaining term / maturity)" value={loan.noteFirstPaymentDate} onChange={v=>set("noteFirstPaymentDate",v)}/>
                 <F label="Note Term (months)"><Num value={loan.noteTerm} onChange={v=>set("noteTerm",v)} placeholder="e.g. 360"/></F>
                 <DateInput label="Original Maturity Date" value={loan.originalMaturityDate} onChange={v=>set("originalMaturityDate",v)}/>
                 <DateInput label="Approval / Effective Date" value={loan.approvalEffectiveDate} onChange={v=>set("approvalEffectiveDate",v)}/>
@@ -4331,11 +4527,12 @@ CREATE POLICY "Users see own versions" ON evaluation_versions FOR ALL USING (aut
                       <div>Preliminary Rate (Step 1): <strong>{Math.min(n(loan.fnmaCurrentIndex) + n(loan.fnmaMargin), n(loan.currentInterestRate)).toFixed(4)}%</strong> (lower of note rate / fully-indexed)</div>
                     </div>}
                   </>)}
-                  {(()=>{const _today=new Date().toISOString().split("T")[0];const _eff=loan.approvalEffectiveDate||_today;const _auto=loan.noteFirstPaymentDate?monthsBetween(loan.noteFirstPaymentDate,_eff):null;return _auto!==null?<div className="space-y-1"><div className="flex items-center justify-between py-1 text-xs"><span className="text-slate-600">Loan Age (months since origination)</span><span className="font-semibold text-blue-700">Auto: {_auto} months {_auto<12?"⚠️ <12mo":""}</span></div>{_auto<12&&<div className="bg-amber-50 rounded p-2 text-xs text-amber-700">⚠️ Loan age &lt; 12 months — ineligible for Payment Deferral and Flex Modification</div>}</div>:<div><F label="Loan Age (months since origination — enter Note First Payment Date to auto-compute)"><Num value={loan.fnmaLoanAge} onChange={v=>set("fnmaLoanAge",v)} placeholder="e.g. 36"/></F>{n(loan.fnmaLoanAge)>0&&n(loan.fnmaLoanAge)<12&&<div className="bg-amber-50 rounded p-2 text-xs text-amber-700 mt-1">⚠️ Loan age &lt; 12 months — ineligible for Payment Deferral and Flex Modification</div>}</div>;})()}
+                  {(()=>{const _today=new Date().toISOString().split("T")[0];const _eff=loan.approvalEffectiveDate||_today;const _ageSrc=loan.noteDate||loan.noteFirstPaymentDate;const _auto=_ageSrc?monthsBetween(_ageSrc,_eff):null;return _auto!==null?<div className="space-y-1"><div className="flex items-center justify-between py-1 text-xs"><span className="text-slate-600">Loan Age (from {loan.noteDate?"Note Date":"First Pmt Date"})</span><span className="font-semibold text-blue-700">Auto: {_auto} months {_auto<12?"⚠️ <12mo":""}</span></div>{_auto<12&&<div className="bg-amber-50 rounded p-2 text-xs text-amber-700">⚠️ Loan age &lt; 12 months — ineligible for Payment Deferral and Flex Modification</div>}</div>:<div><F label="Loan Age (months since origination — enter Note Date to auto-compute)"><Num value={loan.fnmaLoanAge} onChange={v=>set("fnmaLoanAge",v)} placeholder="e.g. 36"/></F>{n(loan.fnmaLoanAge)>0&&n(loan.fnmaLoanAge)<12&&<div className="bg-amber-50 rounded p-2 text-xs text-amber-700 mt-1">⚠️ Loan age &lt; 12 months — ineligible for Payment Deferral and Flex Modification</div>}</div>;})()}
                   <F label="Property Type"><Sel value={loan.fnmaPropertyType} onChange={v=>set("fnmaPropertyType",v)} options={["Principal Residence","Second Home","Investment"]}/></F>
                   <Tog label="Hardship resolved (temporary, no longer a problem)" value={loan.fnmaHardshipResolved} onChange={v=>set("fnmaHardshipResolved",v)}/>
                   <Tog label="Can resume full contractual monthly payment" value={loan.fnmaCanResumeFull} onChange={v=>set("fnmaCanResumeFull",v)}/>
                   <Tog label="Cannot reinstate or afford repayment plan" value={loan.fnmaCannotReinstate} onChange={v=>set("fnmaCannotReinstate",v)}/>
+                  <Tog label="Servicer solicitation campaign active (Campaign MODNRC — BRP not required, LM.R1447/R1452)" value={loan.fnmaSolicitationCampaign} onChange={v=>set("fnmaSolicitationCampaign",v)}/>
                   {(()=>{const _cash=n(loan.cashReservesAmount),_piti=n(loan.currentPITI),_gmi=n(loan.grossMonthlyIncome),_fico=n(loan.fnmaFICO);const _hr=_piti>0&&_gmi>0?_piti/_gmi*100:n(loan.fnmaHousingRatio);const _hasInputs=_cash>0&&_piti>0&&_gmi>0&&_fico>0&&loan.fnmaPropertyType!=="";const _cashLt3Mo=_cash>0&&_piti>0?_cash<_piti*3:loan.fnmaCashReservesLt3Mo;const _isPrimary=loan.fnmaPropertyType==="Principal Residence";const _r1=_isPrimary&&loan.fnmaLongTermHardship&&_cashLt3Mo;const _r2=_fico<=620||loan.fnmaPrior30DLQ12Mo||_hr>55;const _autoID=_hasInputs?(_r1&&_r2):null;return _autoID!==null?<div className="flex items-center justify-between py-1 text-xs"><span className="text-slate-600">Servicer imminent default determination</span><span className={`font-semibold ${_autoID?"text-amber-600":"text-emerald-600"}`}>{_autoID?"⚠️ Yes (auto)":"✅ No (auto)"} — R1:{_r1?"✓":"✗"} R2:{_r2?"✓":"✗"}</span></div>:<Tog label="Servicer imminent default determination (manual — enter cash, PITI, GMI, FICO to auto-compute)" value={loan.fnmaImminentDefault} onChange={v=>set("fnmaImminentDefault",v)}/>;})()}
                   {(()=>{const _today=new Date().toISOString().split("T")[0];const _eff=loan.approvalEffectiveDate||_today;const _origMat=loan.originalMaturityDate||(loan.noteFirstPaymentDate&&loan.noteTerm?calcOriginalMaturity(loan.noteFirstPaymentDate,loan.noteTerm):null);const _mo=_origMat?monthsBetween(_eff,_origMat):null;return _mo!==null?<div className="flex items-center justify-between py-1 text-xs"><span className="text-slate-600">Within 36 months of maturity</span><span className={`font-semibold ${_mo<=36?"text-red-500":"text-emerald-600"}`}>{_mo<=36?"⚠️ Yes — within 36mo":"✅ No"} — auto ({_mo} mo remaining)</span></div>:<Tog label="Within 36 months of maturity or projected payoff (manual — enter Maturity Date to auto-compute)" value={loan.fnmaWithin36MonthsMaturity} onChange={v=>set("fnmaWithin36MonthsMaturity",v)}/>;})()}
                   <Tog label="QRPC (Qualified Right Party Contact) achieved" value={loan.fnmaQRPCAchieved} onChange={v=>set("fnmaQRPCAchieved",v)}/>
@@ -4365,6 +4562,8 @@ CREATE POLICY "Users see own versions" ON evaluation_versions FOR ALL USING (aut
                   <F label="Prior modifications (count — deferrals excluded from count)"><Num value={loan.fnmaPriorModCount} onChange={v=>set("fnmaPriorModCount",v)} placeholder="0"/></F>
                   <Tog label="Failed Flex Mod TPP within 12 months" value={loan.fnmaFailedTPP12Months} onChange={v=>set("fnmaFailedTPP12Months",v)}/>
                   <Tog label="60+ day re-default within 12 months of last Flex Mod" value={loan.fnmaReDefaulted12Months} onChange={v=>set("fnmaReDefaulted12Months",v)}/>
+                  <Tog label="Mortgage Insurance (PMI/MI) present on loan (LM.R1074)" value={loan.fnmaHasMI} onChange={v=>set("fnmaHasMI",v)}/>
+                  {loan.fnmaHasMI&&<Tog label="MI insurer approval confirmed (prior written approval or FNMA delegated authority)" value={loan.fnmaMIApprovalConfirmed} onChange={v=>set("fnmaMIApprovalConfirmed",v)}/>}
                 </Sec>
                 <Sec title="FNMA – Active Status Blockers">
                   <div className="bg-blue-50 border border-blue-200 rounded-lg px-3 py-2 text-xs text-blue-700 mb-1">These fields reflect current workout status — pull from servicing system</div>
@@ -4386,7 +4585,7 @@ CREATE POLICY "Users see own versions" ON evaluation_versions FOR ALL USING (aut
               </>)}
               {loan.loanType==="FHLMC"&&(<>
                 <Sec title="FHLMC – Loan Status">
-                  {(()=>{const _today=new Date().toISOString().split("T")[0];const _eff=loan.approvalEffectiveDate||_today;const _auto=loan.noteFirstPaymentDate?monthsBetween(loan.noteFirstPaymentDate,_eff):null;return _auto!==null?<div className="flex items-center justify-between py-1 text-xs"><span className="text-slate-600">Loan Age (months since origination)</span><span className="font-semibold text-blue-700">Auto: {_auto} months {_auto<12?"⚠️ <12mo":""}</span></div>:<F label="Loan Age (months since origination — enter Note First Payment Date to auto-compute)"><Num value={loan.fhlmcLoanAge} onChange={v=>set("fhlmcLoanAge",v)} placeholder="e.g. 36"/></F>;})()}
+                  {(()=>{const _today=new Date().toISOString().split("T")[0];const _eff=loan.approvalEffectiveDate||_today;const _ageSrc=loan.noteDate||loan.noteFirstPaymentDate;const _auto=_ageSrc?monthsBetween(_ageSrc,_eff):null;return _auto!==null?<div className="flex items-center justify-between py-1 text-xs"><span className="text-slate-600">Loan Age (from {loan.noteDate?"Note Date":"First Pmt Date"})</span><span className="font-semibold text-blue-700">Auto: {_auto} months {_auto<12?"⚠️ <12mo":""}</span></div>:<F label="Loan Age (months since origination — enter Note Date to auto-compute)"><Num value={loan.fhlmcLoanAge} onChange={v=>set("fhlmcLoanAge",v)} placeholder="e.g. 36"/></F>;})()}
                   <F label="Mortgage Program"><Sel value={loan.fhlmcMortgageType} onChange={v=>set("fhlmcMortgageType",v)} options={["Conventional","FHA","VA","RHS"]}/></F>
                   <F label="Rate Type"><Sel value={loan.fhlmcRateType} onChange={v=>set("fhlmcRateType",v)} options={["Fixed Rate","ARM"]}/></F>
                   {loan.fhlmcRateType === "ARM" && (<>
