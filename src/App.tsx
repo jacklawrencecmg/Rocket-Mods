@@ -11,9 +11,273 @@ const GUIDELINE_VERSIONS = {
   FHLMC: "Single-Family Guide Ch. 9200, Bulletin 2026-2",
   FNMA: "Servicing Guide D2-3.2, updated 2025",
 };
-const TABS = ["dashboard","inputs","results","audit","report","compare"];
-const TAB_LABELS = { dashboard:"📊 Dashboard", inputs:"📋 Inputs", results:"✅ Results", audit:"🔍 Audit Trail", report:"📄 Report", compare:"⚖️ Compare" };
+const TABS = ["dashboard","inputs","results","audit","report","compare","portfolio"];
+const TAB_LABELS = { dashboard:"📊 Dashboard", inputs:"📋 Inputs", results:"✅ Results", audit:"🔍 Audit Trail", report:"📄 Report", compare:"⚖️ Compare", portfolio:"📦 Portfolio" };
 const HARDSHIP_TYPES = ["Reduction in Income","Unemployment","Business Failure","Increase in Housing Expenses","Property Problem","Unknown","Disaster"];
+
+// ─── OPTION DOCUMENTS ─────────────────────────────────────────────────────────
+const OPTION_DOCS: Record<string, {required: string[], conditional: {doc: string, condition: string}[], timeline: string}> = {
+  // FHA
+  "FHA Reinstatement": {
+    required: ["Payoff/reinstatement quote from servicer","Certified funds (cashier's check or wire)"],
+    conditional: [],
+    timeline: "Prior to foreclosure sale date"
+  },
+  "FHA Standalone Partial Claim": {
+    required: ["Hardship affidavit","Verification of income (paystubs, tax returns, or SSA letter)","Executed Partial Claim Note and Subordinate Mortgage"],
+    conditional: [{doc:"BRP (Budget/Financial Statement)", condition:"Required if arrears > 6 months"}],
+    timeline: "45 days from approval"
+  },
+  "FHA Payment Deferral": {
+    required: ["Hardship affidavit","COVID/hardship resolution documentation"],
+    conditional: [],
+    timeline: "45 days from approval"
+  },
+  "FHA 30-Year Standalone Modification": {
+    required: ["Hardship affidavit","Verification of income (most recent 30-day paystubs + 2yr W-2s or tax returns)","Bank statements (2 most recent months)","Signed Loan Modification Agreement"],
+    conditional: [{doc:"Trial Payment Plan completion", condition:"Required if income docs not provided upfront"}],
+    timeline: "Trial: 3 months; Permanent mod: 45 days after TPP"
+  },
+  "FHA 40-Year Combination Modification + Partial Claim": {
+    required: ["Hardship affidavit","Verification of income","Bank statements (2 months)","Signed Loan Modification Agreement","Executed Partial Claim Note and Subordinate Mortgage"],
+    conditional: [],
+    timeline: "Trial: 3 months; Permanent mod: 45 days after TPP"
+  },
+  "Payment Supplement": {
+    required: ["Hardship affidavit","Verification of income","Bank statements (2 months)"],
+    conditional: [],
+    timeline: "45 days from approval; supplement paid monthly for up to 36 months"
+  },
+  "Repayment Plan": {
+    required: ["Signed Repayment Plan Agreement"],
+    conditional: [{doc:"Income verification", condition:"Recommended for plans > 6 months"}],
+    timeline: "Plan term: per agreement (max 24 months)"
+  },
+  "Formal Forbearance": {
+    required: ["Hardship affidavit","Signed Forbearance Agreement"],
+    conditional: [],
+    timeline: "Up to 6 months; must exit within 12 months of delinquency"
+  },
+  "Special Forbearance – Unemployment": {
+    required: ["Proof of unemployment benefits or termination letter","Hardship affidavit","Signed Forbearance Agreement"],
+    conditional: [],
+    timeline: "Initial 6 months; extend up to 12 months total if still unemployed"
+  },
+  "FHA Disaster Loan Modification": {
+    required: ["FEMA disaster declaration reference","Proof of damage or insurance claim","Hardship affidavit"],
+    conditional: [{doc:"Income documentation + TPP", condition:"Required if income has NOT been restored to pre-disaster level"}],
+    timeline: "45 days from approval"
+  },
+  "FHA Disaster Standalone Partial Claim": {
+    required: ["FEMA disaster declaration reference","Hardship affidavit","Executed Partial Claim Note and Subordinate Mortgage"],
+    conditional: [],
+    timeline: "45 days from approval"
+  },
+  // USDA
+  "USDA Reinstatement": {
+    required: ["Payoff/reinstatement quote","Certified funds"],
+    conditional: [],
+    timeline: "Prior to foreclosure sale"
+  },
+  "USDA Informal Forbearance": {
+    required: ["Hardship letter","Signed forbearance agreement"],
+    conditional: [],
+    timeline: "Up to 180 days"
+  },
+  "USDA Informal Repayment Plan": {
+    required: ["Signed Repayment Plan Agreement","Verification of income"],
+    conditional: [],
+    timeline: "Per plan agreement"
+  },
+  "USDA Streamline Modification": {
+    required: ["Signed Loan Modification Agreement"],
+    conditional: [{doc:"Income verification", condition:"If borrower requests income-based review"}],
+    timeline: "90-day Trial Payment Plan; permanent mod after successful completion"
+  },
+  "USDA Modification + MRA Servicing Plan": {
+    required: ["Signed Loan Modification Agreement","MRA Note and Subordinate Mortgage"],
+    conditional: [],
+    timeline: "90-day TPP; permanent mod + MRA recorded after"
+  },
+  "USDA Standalone Mortgage Recovery Advance (MRA)": {
+    required: ["Hardship affidavit","Verification of income","MRA Note and Subordinate Mortgage"],
+    conditional: [],
+    timeline: "45 days from approval"
+  },
+  "USDA Compromise Sale": {
+    required: ["Hardship affidavit","BRP (Budget/Financial Statement)","Listing agreement","Purchase contract (when available)","Property valuation (BPO or appraisal)"],
+    conditional: [],
+    timeline: "120 days typical marketing period"
+  },
+  "USDA Deed-in-Lieu": {
+    required: ["Hardship affidavit","BRP","Property clear title evidence","Signed DIL Agreement"],
+    conditional: [],
+    timeline: "45–90 days"
+  },
+  // VA
+  "VA Reinstatement": {
+    required: ["Certified funds for full reinstatement amount"],
+    conditional: [],
+    timeline: "Prior to foreclosure"
+  },
+  "VA Repayment Plan": {
+    required: ["Signed Repayment Plan Agreement","Income verification"],
+    conditional: [],
+    timeline: "Per plan (max 12 months typical)"
+  },
+  "VA Special Forbearance": {
+    required: ["Hardship documentation","Signed Forbearance Agreement"],
+    conditional: [],
+    timeline: "Up to 12 months"
+  },
+  "VA Traditional Modification": {
+    required: ["Hardship affidavit","Income verification (paystubs + W-2s)","Bank statements","Signed Loan Modification Agreement","VA prior approval (VA Form 26-8923)"],
+    conditional: [],
+    timeline: "VA approval required before execution; allow 30–60 days"
+  },
+  "VA 30-Year Loan Modification": {
+    required: ["Hardship affidavit","Income verification","Signed Loan Modification Agreement"],
+    conditional: [],
+    timeline: "45 days from approval"
+  },
+  "VA 40-Year Loan Modification": {
+    required: ["Hardship affidavit","Income verification","Signed Loan Modification Agreement"],
+    conditional: [],
+    timeline: "45 days from approval"
+  },
+  "VA Compromise Sale": {
+    required: ["Hardship affidavit","BRP","Listing agreement","Purchase contract","VA appraisal or BPO","Signed VA Compromise Sale Agreement"],
+    conditional: [],
+    timeline: "VA prior approval required; 120-day marketing period"
+  },
+  "VA Deed-in-Lieu": {
+    required: ["Hardship affidavit","BRP","Property title report","Signed DIL Agreement","VA prior approval"],
+    conditional: [],
+    timeline: "VA prior approval required; 45–90 days"
+  },
+  // FHLMC
+  "FHLMC Reinstatement": {
+    required: ["Certified funds for reinstatement amount"],
+    conditional: [],
+    timeline: "Prior to foreclosure"
+  },
+  "FHLMC Repayment Plan": {
+    required: ["Signed Repayment Plan Agreement"],
+    conditional: [{doc:"Income verification", condition:"Required if plan exceeds 3 months"}],
+    timeline: "Per plan agreement"
+  },
+  "FHLMC Payment Deferral": {
+    required: ["Hardship affidavit"],
+    conditional: [],
+    timeline: "45 days from approval"
+  },
+  "Freddie Mac Flex Modification": {
+    required: ["Hardship affidavit","Verification of income (BRP)","Bank statements (2 months)","Signed Loan Modification Agreement"],
+    conditional: [],
+    timeline: "3-month TPP; permanent mod 45 days after"
+  },
+  "Freddie Mac Streamlined Flex Modification": {
+    required: ["Signed Loan Modification Agreement"],
+    conditional: [],
+    timeline: "3-month TPP; no income docs required"
+  },
+  "Freddie Mac Short Sale": {
+    required: ["Hardship affidavit","BRP","Listing agreement","Executed purchase contract","BPO or appraisal"],
+    conditional: [],
+    timeline: "120-day marketing period; Freddie Mac approval required"
+  },
+  "Freddie Mac Deed-in-Lieu": {
+    required: ["Hardship affidavit","BRP","Title report","Signed DIL Agreement"],
+    conditional: [],
+    timeline: "45–90 days; Freddie Mac approval required"
+  },
+  // FNMA
+  "FNMA Reinstatement": {
+    required: ["Certified funds"],
+    conditional: [],
+    timeline: "Prior to foreclosure"
+  },
+  "FNMA Repayment Plan": {
+    required: ["Signed Repayment Plan Agreement"],
+    conditional: [{doc:"Income verification", condition:"Required if plan > 3 months"}],
+    timeline: "Per plan agreement"
+  },
+  "FNMA Payment Deferral": {
+    required: ["Hardship affidavit"],
+    conditional: [],
+    timeline: "45 days from approval"
+  },
+  "Fannie Mae Flex Modification": {
+    required: ["Hardship affidavit","Verification of income (BRP)","Bank statements (2 months)","Signed Loan Modification Agreement"],
+    conditional: [],
+    timeline: "3-month TPP; permanent mod 45 days after"
+  },
+  "Fannie Mae Flex Modification — Streamlined": {
+    required: ["Signed Loan Modification Agreement"],
+    conditional: [],
+    timeline: "3-month TPP; no income docs required for streamlined"
+  },
+  "FNMA Short Sale / Mortgage Release": {
+    required: ["Hardship affidavit","BRP","Listing agreement","Purchase contract","BPO or appraisal"],
+    conditional: [],
+    timeline: "120-day marketing period"
+  },
+  "FNMA Deed-in-Lieu": {
+    required: ["Hardship affidavit","BRP","Title report","Signed DIL Agreement"],
+    conditional: [],
+    timeline: "45–90 days"
+  },
+};
+
+// ─── OPTION CITATIONS ─────────────────────────────────────────────────────────
+const OPTION_CITATIONS: Record<string, string> = {
+  // FHA
+  "FHA Reinstatement": "ML 2025-06 §IV.A; 24 C.F.R. §203.605",
+  "FHA Standalone Partial Claim": "ML 2025-06 §IV.D; 24 C.F.R. §203.414",
+  "FHA Payment Deferral": "ML 2025-06 §IV.C; ML 2025-12",
+  "FHA 30-Year Standalone Modification": "ML 2025-06 §IV.E; 24 C.F.R. §203.616",
+  "FHA 40-Year Combination Modification + Partial Claim": "ML 2025-06 §IV.F; ML 2025-12",
+  "Payment Supplement": "ML 2025-06 §IV.G; ML 2025-12",
+  "Repayment Plan": "ML 2025-06 §IV.A; HUD Handbook 4000.1 §III.A.2.m",
+  "Formal Forbearance": "ML 2025-06 §IV.A; HUD Handbook 4000.1 §III.A.2.l",
+  "Special Forbearance – Unemployment": "ML 2025-06 §IV.A; HUD Handbook 4000.1 §III.A.2.n",
+  "FHA Disaster Loan Modification": "ML 2025-06 §V; 24 C.F.R. §203.616",
+  "FHA Disaster Standalone Partial Claim": "ML 2025-06 §V; 24 C.F.R. §203.414",
+  // USDA
+  "USDA Informal Forbearance": "RD Instruction 3555-C §3555.302; Final Rule Feb 2025",
+  "USDA Informal Repayment Plan": "RD Instruction 3555-C §3555.303",
+  "USDA Streamline Modification": "RD Instruction 3555-C §3555.304; Final Rule Feb 2025",
+  "USDA Modification + MRA Servicing Plan": "RD Instruction 3555-C §3555.304(d); Final Rule Feb 2025",
+  "USDA Standalone Mortgage Recovery Advance (MRA)": "RD Instruction 3555-C §3555.306",
+  "USDA Compromise Sale": "RD Instruction 3555-C §3555.307",
+  "USDA Deed-in-Lieu": "RD Instruction 3555-C §3555.308",
+  // VA
+  "VA Reinstatement": "VA M26-4 Ch. 5 §2.A",
+  "VA Repayment Plan": "VA M26-4 Ch. 5 §2.B; 38 C.F.R. §36.4319",
+  "VA Special Forbearance": "VA M26-4 Ch. 5 §2.C; Circular 26-25-2",
+  "VA Traditional Modification": "VA M26-4 Ch. 5 §2.D; 38 C.F.R. §36.4315",
+  "VA 30-Year Loan Modification": "VA M26-4 Ch. 5 §2.E; Circular 26-25-2",
+  "VA 40-Year Loan Modification": "Circular 26-22-18; Circular 26-25-2 (10% req removed)",
+  "VA Compromise Sale": "VA M26-4 Ch. 5 §3.A; 38 C.F.R. §36.4324",
+  "VA Deed-in-Lieu": "VA M26-4 Ch. 5 §3.B; 38 C.F.R. §36.4327",
+  // FHLMC
+  "FHLMC Reinstatement": "Freddie Mac Guide §9202.2",
+  "FHLMC Repayment Plan": "Freddie Mac Guide §9203.1",
+  "FHLMC Payment Deferral": "Freddie Mac Guide §9204.3; Bulletin 2019-15",
+  "Freddie Mac Flex Modification": "Freddie Mac Guide §9206; Bulletin 2026-2",
+  "Freddie Mac Streamlined Flex Modification": "Freddie Mac Guide §9206.7",
+  "Freddie Mac Short Sale": "Freddie Mac Guide §9208; Bulletin 2026-2",
+  "Freddie Mac Deed-in-Lieu": "Freddie Mac Guide §9209",
+  // FNMA
+  "FNMA Reinstatement": "Fannie Mae Servicing Guide D2-3.2-01",
+  "FNMA Repayment Plan": "Fannie Mae Servicing Guide D2-3.2-02",
+  "FNMA Payment Deferral": "Fannie Mae Servicing Guide D2-3.2-04; LL 2021-07",
+  "Fannie Mae Flex Modification": "Fannie Mae Servicing Guide D2-3.2-06",
+  "Fannie Mae Flex Modification — Streamlined": "Fannie Mae Servicing Guide D2-3.2-06 (Streamlined)",
+  "FNMA Short Sale / Mortgage Release": "Fannie Mae Servicing Guide D2-3.3-01",
+  "FNMA Deed-in-Lieu": "Fannie Mae Servicing Guide D2-3.3-02",
+  "FNMA Forbearance Plan": "Fannie Mae Servicing Guide D2-3.2-01",
+};
 const STANDARD_HARDSHIPS = ["Unemployment","Business Failure","Increase in Housing Expenses","Property Problem","Reduction in Income","Unknown"];
 
 // ─── INITIAL STATE ────────────────────────────────────────────────────────────
@@ -2643,6 +2907,17 @@ function MainApp({profile,onSignOut}:{profile:Profile;onSignOut:()=>void}) {
   const [savedCases,setSavedCases]=useState<any[]>([]);
   const [pendingUsers,setPendingUsers]=useState<{id:string;email:string;full_name:string;requested_at:string}[]>([]);
   const [adminMsg,setAdminMsg]=useState("");
+  // Document checklist state
+  const [checkedDocs,setCheckedDocs]=useState<Record<string, boolean>>({});
+  const [selectedDocOption,setSelectedDocOption]=useState<string>("");
+  // Portfolio state
+  const [portfolioFile,setPortfolioFile]=useState<File|null>(null);
+  const [portfolioResults,setPortfolioResults]=useState<any[]>([]);
+  const [portfolioRunning,setPortfolioRunning]=useState(false);
+  const [portfolioProgress,setPortfolioProgress]=useState(0);
+  // Team/assignment state
+  const [assigneeEmail,setAssigneeEmail]=useState("");
+  const [assigneeFilter,setAssigneeFilter]=useState("mine");
   useEffect(()=>{
     if(showAdmin&&profile.role==="admin"){
       supabase.rpc("get_pending_users").then(({data})=>setPendingUsers((data||[]) as any));
@@ -2752,6 +3027,8 @@ function MainApp({profile,onSignOut}:{profile:Profile;onSignOut:()=>void}) {
         guideline_version:GUIDELINE_VERSIONS[loan.loanType as keyof typeof GUIDELINE_VERSIONS]||null,
         evaluated_at:new Date().toISOString(),
         status:"evaluated",
+        checked_docs:checkedDocs,
+        assignee_email:assigneeEmail||null,
         ...(userId ? { user_id: userId } : {}),
       });
       setSaveToast("✅ Case saved!");
@@ -2773,6 +3050,8 @@ function MainApp({profile,onSignOut}:{profile:Profile;onSignOut:()=>void}) {
     setResults(savedCase.results||[]);
     setEvaluated(true);
     setCaseNotes(savedCase.notes||"");
+    setCheckedDocs(savedCase.checked_docs||{});
+    setAssigneeEmail(savedCase.assignee_email||"");
     setShowLoadModal(false);
     setTab("results");
   };
@@ -2813,11 +3092,98 @@ function MainApp({profile,onSignOut}:{profile:Profile;onSignOut:()=>void}) {
       c.borrower_name?.toLowerCase().includes(dashSearch.toLowerCase());
     const matchType = dashFilter === "all" || c.loan_type === dashFilter;
     const matchStatus = dashStatus === "all" || (c.status || "open") === dashStatus;
-    return matchSearch && matchType && matchStatus;
+    const matchAssignee = assigneeFilter === "mine" ? (c.assignee_email === profile?.email || !c.assignee_email) : true;
+    return matchSearch && matchType && matchStatus && matchAssignee;
   });
+
+  // CSV parser
+  const parseCSV = (text: string): Record<string, string>[] => {
+    const lines = text.split(/\r?\n/).filter(l => l.trim());
+    if (lines.length < 2) return [];
+    const headers = lines[0].split(",").map(h => h.trim().replace(/^"|"$/g, ""));
+    return lines.slice(1).map(line => {
+      const vals = line.split(",").map(v => v.trim().replace(/^"|"$/g, ""));
+      return Object.fromEntries(headers.map((h, i) => [h, vals[i] || ""]));
+    });
+  };
+
+  const runPortfolio = async () => {
+    if (!portfolioFile) return;
+    setPortfolioRunning(true);
+    setPortfolioProgress(0);
+    const text = await portfolioFile.text();
+    const rows = parseCSV(text);
+    const res: any[] = [];
+    for (let i = 0; i < rows.length; i++) {
+      const loanData: any = { ...initLoan };
+      const row = rows[i];
+      Object.entries(row).forEach(([k, v]) => {
+        const mapped = FIELD_MAP[k];
+        if (mapped && v) loanData[mapped] = v;
+      });
+      Object.keys(loanData).forEach(field => {
+        if (row[field] !== undefined && row[field] !== "") loanData[field] = row[field];
+      });
+      let evalResults: any[] = [];
+      try {
+        const lt = loanData.loanType;
+        if (lt === "FHA") evalResults = evaluateFHA(loanData);
+        else if (lt === "USDA") evalResults = evaluateUSDA(loanData);
+        else if (lt === "VA") evalResults = evaluateVA(loanData);
+        else if (lt === "FHLMC") evalResults = evaluateFHLMC(loanData);
+        else if (lt === "FNMA") evalResults = evaluateFNMA(loanData);
+      } catch {}
+      const eligibleOpts = evalResults.filter(r => r.eligible).map(r => r.option);
+      const topOption = eligibleOpts[0] || "None";
+      res.push({
+        loanNumber: loanData.loanNumber || `Row ${i+1}`,
+        borrowerName: loanData.borrowerName,
+        loanType: loanData.loanType,
+        delinquencyMonths: loanData.delinquencyMonths,
+        upb: loanData.upb,
+        eligibleCount: eligibleOpts.length,
+        topOption,
+        eligible: eligibleOpts.join("; "),
+        hardshipType: loanData.hardshipType,
+        _loan: loanData,
+      });
+      setPortfolioProgress(Math.round((i + 1) / rows.length * 100));
+      if (i % 10 === 0) await new Promise(r => setTimeout(r, 0));
+    }
+    setPortfolioResults(res);
+    setPortfolioRunning(false);
+  };
+
+  const exportPortfolioCSV = () => {
+    const headers = ["Loan Number","Borrower","Loan Type","DLQ Months","UPB","Eligible Count","Top Option","All Eligible Options","Hardship"];
+    const rows = portfolioResults.map(r => [
+      r.loanNumber, r.borrowerName, r.loanType, r.delinquencyMonths,
+      r.upb, r.eligibleCount, r.topOption, r.eligible, r.hardshipType
+    ]);
+    const csv = [headers, ...rows].map(r => r.map(v => `"${v||""}"`).join(",")).join("\n");
+    const blob = new Blob([csv], { type: "text/csv" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a"); a.href = url; a.download = "portfolio_evaluation.csv"; a.click();
+    URL.revokeObjectURL(url);
+  };
   const gmi=n(loan.grossMonthlyIncome);
   const target31=gmi>0?(gmi*0.31).toFixed(2):null;
   const target40=gmi>0?(gmi*0.40).toFixed(2):null;
+
+  // Analytics computed from dashCases
+  const analytics = useMemo(() => {
+    if (dashCases.length === 0) return null;
+    const byType = Object.fromEntries(["FHA","USDA","VA","FNMA","FHLMC"].map(t => [t, dashCases.filter(c=>c.loan_type===t).length]));
+    const byStatus = Object.fromEntries(["open","evaluated","recommended","approved","implemented"].map(s => [s, dashCases.filter(c=>(c.status||"open")===s).length]));
+    const optionCounts: Record<string,number> = {};
+    dashCases.forEach(c => {
+      const top = c.results?.find((r:any)=>r.eligible)?.option;
+      if (top) optionCounts[top] = (optionCounts[top]||0) + 1;
+    });
+    const topOptions = Object.entries(optionCounts).sort((a,b)=>b[1]-a[1]).slice(0,5);
+    const avgDlq = dashCases.reduce((s,c)=>s+(Number(c.loan_data?.delinquencyMonths)||0),0)/dashCases.length;
+    return { byType, byStatus, topOptions, avgDlq, total: dashCases.length };
+  }, [dashCases]);
 
   const askAI=async()=>{
     if (!apiKey.trim()) { setAiResponse("⚠️ Enter your Anthropic API key in the field above first."); return; }
@@ -2859,7 +3225,7 @@ function MainApp({profile,onSignOut}:{profile:Profile;onSignOut:()=>void}) {
     </div>
     ${ratiosHTML}
     <h2>✅ Eligible Options (${eligible.length})</h2>
-    ${eligible.length===0?"<p style='color:#dc2626;font-weight:bold'>No eligible options. Refer for adverse action / foreclosure review.</p>":eligible.map(r=>`<div class="eligible"><h3>${r.option}</h3>${r.note?`<p><strong>📌 Note:</strong> ${r.note}</p>`:""}${calcTermsHTML(r)}</div>`).join("")}
+    ${eligible.length===0?"<p style='color:#dc2626;font-weight:bold'>No eligible options. Refer for adverse action / foreclosure review.</p>":eligible.map(r=>`<div class="eligible"><h3>${r.option}${OPTION_CITATIONS[r.option]?" ("+OPTION_CITATIONS[r.option]+")":""}</h3>${r.note?`<p><strong>📌 Note:</strong> ${r.note}</p>`:""}${calcTermsHTML(r)}</div>`).join("")}
     <h2>❌ Ineligible Options (${ineligible.length})</h2>
     <table style="width:100%;border-collapse:collapse"><tr><th style="text-align:left;padding:6px;background:#f3f4f6;border:1px solid #e5e7eb">Option</th><th style="text-align:left;padding:6px;background:#f3f4f6;border:1px solid #e5e7eb">Failed Condition</th><th style="text-align:left;padding:6px;background:#f3f4f6;border:1px solid #e5e7eb">Value</th></tr>${ineligible.map(r=>{const f=r.nodes?.find(nd=>!nd.pass);return`<tr><td style="padding:5px 8px;border:1px solid #e5e7eb">${r.option}</td><td style="padding:5px 8px;border:1px solid #e5e7eb;color:#dc2626">${f?f.question:"—"}</td><td style="padding:5px 8px;border:1px solid #e5e7eb">${f?f.answer:"—"}</td></tr>`;}).join("")}</table>
     ${aiResponse?`<h2>🤖 AI Analysis</h2><div style="background:#f8fafc;border:1px solid #e2e8f0;padding:12px;border-radius:6px;white-space:pre-wrap;font-size:12px">${aiResponse}</div>`:""}
@@ -3046,6 +3412,16 @@ CREATE POLICY "Users see own cases" ON evaluations
               <select className="border rounded-lg px-3 py-1.5 text-sm" value={dashStatus} onChange={e=>setDashStatus(e.target.value)}>
                 {["all","open","evaluated","recommended","approved","implemented"].map(s=><option key={s} value={s}>{s.charAt(0).toUpperCase()+s.slice(1)}</option>)}
               </select>
+              {profile && (
+                <div className="flex rounded-lg overflow-hidden border border-slate-200">
+                  {["mine","all"].map(v => (
+                    <button key={v} onClick={() => setAssigneeFilter(v)}
+                      className={`px-3 py-1.5 text-xs font-bold transition-colors ${assigneeFilter===v?"bg-emerald-700 text-white":"bg-white text-slate-500 hover:bg-slate-50"}`}>
+                      {v === "mine" ? "👤 My Cases" : "👥 All Cases"}
+                    </button>
+                  ))}
+                </div>
+              )}
             </div>
             {/* Stats row */}
             {dashCases.length > 0 && (
@@ -3106,6 +3482,55 @@ CREATE POLICY "Users see own cases" ON evaluations
                   </div>
                 )
             }
+            {analytics && (
+              <div className="mt-6">
+                <div className="text-sm font-black text-slate-700 mb-3">📊 Portfolio Analytics</div>
+                <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                  {/* By loan type */}
+                  <div className="bg-white rounded-xl border border-slate-200 p-4">
+                    <div className="text-xs font-bold text-slate-500 uppercase mb-3">Cases by Type</div>
+                    {Object.entries(analytics.byType).filter(([,v])=>v>0).map(([type, count]) => (
+                      <div key={type} className="flex items-center gap-2 mb-1.5">
+                        <span className="text-xs text-slate-600 w-12">{type}</span>
+                        <div className="flex-1 bg-slate-100 rounded-full h-2">
+                          <div className="bg-emerald-500 h-2 rounded-full" style={{width:`${(count as number)/analytics.total*100}%`}}/>
+                        </div>
+                        <span className="text-xs font-bold text-slate-700 w-6 text-right">{count}</span>
+                      </div>
+                    ))}
+                  </div>
+                  {/* By status */}
+                  <div className="bg-white rounded-xl border border-slate-200 p-4">
+                    <div className="text-xs font-bold text-slate-500 uppercase mb-3">Cases by Status</div>
+                    {Object.entries(analytics.byStatus).filter(([,v])=>v>0).map(([status, count]) => {
+                      const colors: Record<string,string> = {open:"bg-slate-400",evaluated:"bg-blue-400",recommended:"bg-amber-400",approved:"bg-emerald-500",implemented:"bg-purple-500"};
+                      return (
+                        <div key={status} className="flex items-center gap-2 mb-1.5">
+                          <span className="text-xs text-slate-600 w-24 capitalize">{status}</span>
+                          <div className="flex-1 bg-slate-100 rounded-full h-2">
+                            <div className={`${colors[status]} h-2 rounded-full`} style={{width:`${(count as number)/analytics.total*100}%`}}/>
+                          </div>
+                          <span className="text-xs font-bold text-slate-700 w-6 text-right">{count}</span>
+                        </div>
+                      );
+                    })}
+                  </div>
+                  {/* Top options */}
+                  <div className="bg-white rounded-xl border border-slate-200 p-4">
+                    <div className="text-xs font-bold text-slate-500 uppercase mb-3">Top Eligible Options</div>
+                    {analytics.topOptions.map(([option, count]) => (
+                      <div key={option} className="flex items-center gap-2 mb-1.5">
+                        <span className="text-xs text-slate-600 flex-1 truncate" title={option}>{option}</span>
+                        <span className="text-xs font-bold text-emerald-700">{count}</span>
+                      </div>
+                    ))}
+                    <div className="mt-3 pt-3 border-t border-slate-100 text-xs text-slate-500">
+                      Avg DLQ: <strong>{analytics.avgDlq.toFixed(1)} months</strong>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            )}
           </div>
         )}
 
@@ -3662,6 +4087,7 @@ CREATE POLICY "Users see own cases" ON evaluations
                         <div className="w-7 h-7 rounded-full bg-emerald-500 flex items-center justify-center text-white text-xs font-black flex-shrink-0">{i+1}</div>
                         <div>
                           <div className="font-bold text-sm text-slate-800">{r.option}</div>
+                          {OPTION_CITATIONS[r.option] && <div className="text-xs text-slate-400 mt-0.5">📖 {OPTION_CITATIONS[r.option]}</div>}
                           {r.note&&<div className="text-xs text-emerald-600 mt-0.5">{r.note}</div>}
                         </div>
                       </div>
@@ -3683,6 +4109,10 @@ CREATE POLICY "Users see own cases" ON evaluations
                   <div className="bg-white rounded-xl border border-slate-200 shadow-sm p-4 mb-4">
                     <div className="text-[10px] font-black uppercase tracking-widest text-slate-400 mb-2">Case Notes</div>
                     <textarea className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-emerald-400 resize-none" rows={3} value={caseNotes} onChange={e=>setCaseNotes(e.target.value)} placeholder="Add underwriting notes, documentation status, etc."/>
+                    <div className="mt-2">
+                      <div className="text-[10px] font-bold uppercase tracking-widest text-slate-400 mb-1">Assign To (email)</div>
+                      <input className="border border-slate-200 rounded px-2 py-1 text-sm w-full" value={assigneeEmail} onChange={e=>setAssigneeEmail(e.target.value)} placeholder="colleague@company.com"/>
+                    </div>
                     <button onClick={saveCase} className="mt-2 w-full bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-bold py-2 rounded-lg transition-all">💾 Save Case</button>
                     {saveToast&&<div className="mt-1.5 text-xs text-emerald-700 font-semibold">{saveToast}</div>}
                   </div>
@@ -3728,6 +4158,62 @@ CREATE POLICY "Users see own cases" ON evaluations
                     </div>
                   );
                 })()}
+                {results.filter(r=>r.eligible).length > 0 && (
+                  <div className="bg-white rounded-2xl border border-slate-200 p-5 mt-4 mb-4">
+                    <div className="text-sm font-black text-slate-700 mb-3">📋 Document Checklist</div>
+                    <select className="border rounded-lg px-2 py-1.5 text-sm w-full mb-3"
+                      value={selectedDocOption} onChange={e=>setSelectedDocOption(e.target.value)}>
+                      <option value="">Select option to view docs...</option>
+                      {results.filter(r=>r.eligible).map(r=>(
+                        <option key={r.option} value={r.option}>{r.option}</option>
+                      ))}
+                    </select>
+                    {selectedDocOption && OPTION_DOCS[selectedDocOption] && (() => {
+                      const docs = OPTION_DOCS[selectedDocOption];
+                      return (
+                        <div>
+                          {docs.required.map(doc => {
+                            const key = `${selectedDocOption}::${doc}`;
+                            return (
+                              <label key={key} className="flex items-start gap-2 py-1.5 cursor-pointer group">
+                                <input type="checkbox" className="mt-0.5 accent-emerald-600"
+                                  checked={!!checkedDocs[key]}
+                                  onChange={e => setCheckedDocs(prev => ({...prev, [key]: e.target.checked}))}/>
+                                <span className={`text-sm ${checkedDocs[key] ? "line-through text-slate-400" : "text-slate-700"}`}>{doc}</span>
+                                <span className="text-xs bg-red-100 text-red-600 px-1.5 py-0.5 rounded ml-auto font-bold flex-shrink-0">Required</span>
+                              </label>
+                            );
+                          })}
+                          {docs.conditional.map(({doc, condition}) => {
+                            const key = `${selectedDocOption}::cond::${doc}`;
+                            return (
+                              <label key={key} className="flex items-start gap-2 py-1.5 cursor-pointer">
+                                <input type="checkbox" className="mt-0.5 accent-amber-500"
+                                  checked={!!checkedDocs[key]}
+                                  onChange={e => setCheckedDocs(prev => ({...prev, [key]: e.target.checked}))}/>
+                                <div className="flex-1">
+                                  <span className={`text-sm ${checkedDocs[key] ? "line-through text-slate-400" : "text-slate-700"}`}>{doc}</span>
+                                  <div className="text-xs text-amber-600">{condition}</div>
+                                </div>
+                                <span className="text-xs bg-amber-100 text-amber-600 px-1.5 py-0.5 rounded ml-auto font-bold flex-shrink-0">Conditional</span>
+                              </label>
+                            );
+                          })}
+                          <div className="mt-3 pt-3 border-t border-slate-100 text-xs text-slate-500">
+                            ⏱️ <strong>Timeline:</strong> {docs.timeline}
+                          </div>
+                          {(() => {
+                            const allDocs = [...docs.required.map(d=>`${selectedDocOption}::${d}`), ...docs.conditional.map(d=>`${selectedDocOption}::cond::${d.doc}`)];
+                            const checked = allDocs.filter(k=>checkedDocs[k]).length;
+                            return checked > 0 && (
+                              <div className="mt-2 text-xs text-emerald-600 font-semibold">{checked}/{allDocs.length} documents received</div>
+                            );
+                          })()}
+                        </div>
+                      );
+                    })()}
+                  </div>
+                )}
                 <div className="text-[10px] font-black uppercase tracking-widest text-slate-400 mb-3">Ineligible Options</div>
                 {ineligible.map((r,i)=>{
                   const fail=r.nodes?.find(nd=>!nd.pass);
@@ -3776,6 +4262,9 @@ CREATE POLICY "Users see own cases" ON evaluations
                       <span className="text-slate-400 text-xs flex items-center gap-1">{r.nodes?.length} checks <span>{expandedAudit===i?"▲":"▼"}</span></span>
                     </button>
                     {expandedAudit===i&&(<div className="px-4 pb-4 border-t border-slate-100">
+                      {OPTION_CITATIONS[r.option] && (
+                        <div className="text-xs text-slate-400 italic mb-2 mt-2">Regulatory basis: {OPTION_CITATIONS[r.option]}</div>
+                      )}
                       <div className="mt-3 space-y-1">
                         {r.nodes?.map((nd,j)=>(<div key={j} className={`flex items-center gap-2 p-2 rounded-lg text-xs ${nd.pass?"bg-emerald-50 text-emerald-800":"bg-red-50 text-red-700 font-semibold"}`}>
                           <span className={`w-4 h-4 rounded-full flex items-center justify-center text-[9px] font-black flex-shrink-0 ${nd.pass?"bg-emerald-500 text-white":"bg-red-500 text-white"}`}>{nd.pass?"✓":"✗"}</span>
@@ -3947,6 +4436,107 @@ CREATE POLICY "Users see own cases" ON evaluations
                 </table></div>
               </div>);
             })()}
+          </div>
+        )}
+
+        {/* ── PORTFOLIO ── */}
+        {tab==="portfolio"&&(
+          <div className="max-w-7xl mx-auto p-5">
+            <div className="text-xl font-black text-slate-800 mb-1">📦 Portfolio Evaluation</div>
+            <div className="text-sm text-slate-500 mb-5">Upload a CSV of loans to evaluate all at once</div>
+
+            {/* Upload area */}
+            <div className="bg-white rounded-2xl border-2 border-dashed border-slate-300 hover:border-emerald-400 p-10 text-center mb-5 transition-colors">
+              <div className="text-4xl mb-3">📄</div>
+              <div className="text-sm font-bold text-slate-700 mb-1">Drop CSV file here or click to upload</div>
+              <div className="text-xs text-slate-400 mb-4">Required columns: loanType, delinquencyMonths. Optional: loanNumber, borrowerName, upb, currentPITI, grossMonthlyIncome, hardshipType, etc.</div>
+              <input type="file" accept=".csv" className="hidden" id="csv-upload"
+                onChange={e => { setPortfolioFile(e.target.files?.[0] || null); setPortfolioResults([]); }}/>
+              <label htmlFor="csv-upload" className="bg-emerald-700 text-white px-6 py-2 rounded-lg text-sm font-bold cursor-pointer hover:bg-emerald-800">Choose CSV File</label>
+              {portfolioFile && <div className="text-sm text-emerald-600 mt-3 font-semibold">✅ {portfolioFile.name}</div>}
+            </div>
+
+            {/* Download template */}
+            <div className="text-xs text-slate-500 mb-4">
+              Need a template?
+              <button onClick={() => {
+                const headers = "loanNumber,borrowerName,loanType,delinquencyMonths,upb,currentPITI,currentPI,grossMonthlyIncome,currentEscrow,hardshipType,hardshipDuration,lienPosition,occupancyStatus,propertyDisposition,arrearagesToCapitalize,pmmsRate,currentInterestRate";
+                const example = "1234567890,Smith John,FHA,6,247500,1800,1388,5200,412,Reduction in Income,Long Term,First,Owner Occupied,Principal Residence,7200,6.75,6.875";
+                const csv = headers + "\n" + example;
+                const blob = new Blob([csv], {type:"text/csv"});
+                const url = URL.createObjectURL(blob);
+                const a = document.createElement("a"); a.href=url; a.download="portfolio_template.csv"; a.click();
+                URL.revokeObjectURL(url);
+              }} className="text-emerald-600 underline ml-1">Download template CSV</button>
+            </div>
+
+            {portfolioFile && !portfolioRunning && portfolioResults.length === 0 && (
+              <button onClick={runPortfolio} className="w-full bg-emerald-700 hover:bg-emerald-800 text-white font-black py-3 rounded-xl text-sm shadow-lg transition-all active:scale-95">
+                🔍 Evaluate All Loans →
+              </button>
+            )}
+
+            {portfolioRunning && (
+              <div className="text-center py-8">
+                <div className="text-slate-500 text-sm mb-3">Evaluating loans... {portfolioProgress}%</div>
+                <div className="w-full bg-slate-100 rounded-full h-2"><div className="bg-emerald-500 h-2 rounded-full transition-all" style={{width:`${portfolioProgress}%`}}/></div>
+              </div>
+            )}
+
+            {portfolioResults.length > 0 && (
+              <>
+                {/* Summary stats */}
+                <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mb-5">
+                  {([
+                    ["Total Loans", portfolioResults.length],
+                    ["With Eligible Options", portfolioResults.filter(r=>r.eligibleCount>0).length],
+                    ["No Options Available", portfolioResults.filter(r=>r.eligibleCount===0).length],
+                    ["Avg Eligible Options", (portfolioResults.reduce((s,r)=>s+r.eligibleCount,0)/portfolioResults.length).toFixed(1)],
+                  ] as [string, string|number][]).map(([label, val]) => (
+                    <div key={label} className="bg-white rounded-xl border border-slate-200 p-4 text-center">
+                      <div className="text-2xl font-black text-emerald-700">{val}</div>
+                      <div className="text-xs text-slate-500 mt-0.5">{label}</div>
+                    </div>
+                  ))}
+                </div>
+
+                <div className="flex gap-2 mb-3">
+                  <button onClick={exportPortfolioCSV} className="bg-emerald-700 text-white px-4 py-2 rounded-lg text-sm font-bold hover:bg-emerald-800">⬇️ Export CSV</button>
+                  <button onClick={() => { setPortfolioResults([]); setPortfolioFile(null); }} className="bg-slate-100 text-slate-700 px-4 py-2 rounded-lg text-sm hover:bg-slate-200">Clear</button>
+                </div>
+
+                <div className="bg-white rounded-2xl border border-slate-200 overflow-auto">
+                  <table className="w-full text-sm min-w-[700px]">
+                    <thead className="bg-slate-50 border-b border-slate-200">
+                      <tr>
+                        {["Loan #","Borrower","Type","DLQ","UPB","Eligible","Top Option","Action"].map(h=>(
+                          <th key={h} className="text-left px-4 py-3 text-xs font-bold text-slate-500 uppercase tracking-wide whitespace-nowrap">{h}</th>
+                        ))}
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {portfolioResults.map((r, i) => (
+                        <tr key={i} className="border-b border-slate-100 hover:bg-slate-50">
+                          <td className="px-4 py-2.5 font-mono text-xs">{r.loanNumber}</td>
+                          <td className="px-4 py-2.5">{r.borrowerName || "—"}</td>
+                          <td className="px-4 py-2.5"><span className="bg-slate-100 text-slate-700 text-xs font-bold px-2 py-0.5 rounded">{r.loanType}</span></td>
+                          <td className="px-4 py-2.5">{r.delinquencyMonths || "—"}</td>
+                          <td className="px-4 py-2.5">{r._loan.upb ? `$${Number(r._loan.upb).toLocaleString()}` : "—"}</td>
+                          <td className="px-4 py-2.5"><span className={`text-xs font-bold px-2 py-0.5 rounded ${r.eligibleCount>0?"bg-emerald-100 text-emerald-700":"bg-red-100 text-red-600"}`}>{r.eligibleCount}</span></td>
+                          <td className="px-4 py-2.5 text-xs text-emerald-700 font-semibold max-w-48 truncate" title={r.topOption}>{r.topOption}</td>
+                          <td className="px-4 py-2.5">
+                            <button className="text-xs text-emerald-600 hover:text-emerald-800 font-semibold whitespace-nowrap"
+                              onClick={() => { setLoan({...initLoan, ...r._loan}); setTab("inputs"); }}>
+                              Open →
+                            </button>
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              </>
+            )}
           </div>
         )}
       </div>
