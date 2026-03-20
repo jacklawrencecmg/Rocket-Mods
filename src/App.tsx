@@ -1737,9 +1737,19 @@ function evaluateUSDA(l) {
   const dlqD=n(l.delinquencyDays)||n(l.delinquencyMonths)*30, dlqM=n(l.delinquencyMonths), nm=parseInt(l.usdaNumPrevMods)||0;
   const isD=l.hardshipType==="Disaster", ltp=l.hardshipDuration==="Long Term"||l.hardshipDuration==="Permanent";
   const br=l.propertyCondition!=="Condemned"&&l.propertyCondition!=="Uninhabitable"&&!l.occupancyAbandoned&&l.lienPosition==="First";
+  // 1b: auto-compute usdaUpbGe5000
+  const usdaUpb5k = n(l.upb) > 0 ? n(l.upb) >= 5000 : l.usdaUpbGe5000;
+  // 1c: auto-compute usdaPaymentsMade12 (loan age >= 12 months)
+  const _usdaToday = new Date().toISOString().split("T")[0];
+  const _usdaEff = l.approvalEffectiveDate || _usdaToday;
+  const _usdaLoanAge = l.noteFirstPaymentDate ? monthsBetween(l.noteFirstPaymentDate, _usdaEff) : null;
+  const usdaPayments12 = _usdaLoanAge !== null ? _usdaLoanAge >= 12 : l.usdaPaymentsMade12;
+  // 1g: auto-compute usdaForbearancePeriodLt12 and usdaTotalDLQLt12
+  const usdaFbLt12 = dlqM > 0 ? dlqM < 12 : l.usdaForbearancePeriodLt12;
+  const usdaDLQLt12 = dlqM > 0 ? dlqM < 12 : l.usdaTotalDLQLt12;
   // Informal Forbearance base: allows pre-default (dlqD >= 0) per HB-1-3555 §18.4
-  const ib=!isD&&dlqD>=0&&dlqD<360&&l.borrowerIntentRetention&&l.hardshipDuration==="Short Term"&&l.usdaHardshipNotExcluded&&l.lienPosition==="First"&&l.propertyCondition!=="Condemned"&&!l.occupancyAbandoned&&l.occupancyStatus==="Owner Occupied"&&(l.usdaForbearancePeriodLt12||l.usdaTotalDLQLt12);
-  const iN=[node("Non-disaster hardship",l.hardshipType,!isD),node("DLQ<360d",dlqD,dlqD>=0&&dlqD<360),node("Intent=Retain",l.borrowerIntentRetention,l.borrowerIntentRetention),node("Short Term hardship",l.hardshipDuration,l.hardshipDuration==="Short Term"),node("Not excluded type",l.usdaHardshipNotExcluded,l.usdaHardshipNotExcluded),node("Lien=First",l.lienPosition,l.lienPosition==="First"),node("Not Condemned",l.propertyCondition,l.propertyCondition!=="Condemned"),node("Not Abandoned",!l.occupancyAbandoned,!l.occupancyAbandoned),node("Owner Occupied",l.occupancyStatus,l.occupancyStatus==="Owner Occupied"),node("Forbearance or DLQ<12mo",l.usdaForbearancePeriodLt12||l.usdaTotalDLQLt12,l.usdaForbearancePeriodLt12||l.usdaTotalDLQLt12)];
+  const ib=!isD&&dlqD>=0&&dlqD<360&&l.borrowerIntentRetention&&l.hardshipDuration==="Short Term"&&l.usdaHardshipNotExcluded&&l.lienPosition==="First"&&l.propertyCondition!=="Condemned"&&!l.occupancyAbandoned&&l.occupancyStatus==="Owner Occupied"&&(usdaFbLt12||usdaDLQLt12);
+  const iN=[node("Non-disaster hardship",l.hardshipType,!isD),node("DLQ<360d",dlqD,dlqD>=0&&dlqD<360),node("Intent=Retain",l.borrowerIntentRetention,l.borrowerIntentRetention),node("Short Term hardship",l.hardshipDuration,l.hardshipDuration==="Short Term"),node("Not excluded type",l.usdaHardshipNotExcluded,l.usdaHardshipNotExcluded),node("Lien=First",l.lienPosition,l.lienPosition==="First"),node("Not Condemned",l.propertyCondition,l.propertyCondition!=="Condemned"),node("Not Abandoned",!l.occupancyAbandoned,!l.occupancyAbandoned),node("Owner Occupied",l.occupancyStatus,l.occupancyStatus==="Owner Occupied"),node("Forbearance or DLQ<12mo",usdaFbLt12||usdaDLQLt12,usdaFbLt12||usdaDLQLt12)];
   // Repayment Plan base: hardship resolved (separate from forbearance base) per HB-1-3555 §18.4
   const rb=!isD&&dlqD>0&&dlqD<360&&l.borrowerIntentRetention&&l.hardshipDuration==="Resolved"&&l.usdaHardshipNotExcluded&&l.lienPosition==="First"&&l.propertyCondition!=="Condemned"&&!l.occupancyAbandoned&&l.occupancyStatus==="Owner Occupied";
   const rN=[node("Non-disaster hardship",l.hardshipType,!isD),node("DLQ>0&<360d",dlqD,dlqD>0&&dlqD<360),node("Intent=Retain",l.borrowerIntentRetention,l.borrowerIntentRetention),node("Hardship=Resolved",l.hardshipDuration,l.hardshipDuration==="Resolved"),node("Not excluded type",l.usdaHardshipNotExcluded,l.usdaHardshipNotExcluded),node("Lien=First",l.lienPosition,l.lienPosition==="First"),node("Not Condemned",l.propertyCondition,l.propertyCondition!=="Condemned"),node("Not Abandoned",!l.occupancyAbandoned,!l.occupancyAbandoned),node("Owner Occupied",l.occupancyStatus,l.occupancyStatus==="Owner Occupied")];
@@ -1769,8 +1779,8 @@ function evaluateUSDA(l) {
 
   // Issue 3: Add propertyListedForSale check; Issue 6: clarify prior mod count label
   const notListedForSale = !l.propertyListedForSale;
-  const sb=!isD&&br&&l.borrowerIntentRetention&&l.occupancyStatus==="Owner Occupied"&&nm<2&&!l.usdaPriorFailedStreamlineTPP&&dlqD>=90&&l.usdaUpbGe5000&&l.usdaPaymentsMade12&&l.usdaBankruptcyNotActive&&l.usdaLitigationNotActive&&l.usdaForeclosureSaleGe60Away&&notListedForSale;
-  results.push({option:"USDA Streamline Loan Modification",eligible:sb,nodes:[node("Non-disaster hardship",l.hardshipType,!isD),node("≥90d DLQ",dlqD,dlqD>=90),node("UPB≥$5k",l.usdaUpbGe5000,l.usdaUpbGe5000),node("12+ payments since origination (loan age)",l.usdaPaymentsMade12,l.usdaPaymentsMade12),node("Bankruptcy≠Active",l.usdaBankruptcyNotActive,l.usdaBankruptcyNotActive),node("Litigation≠Active",l.usdaLitigationNotActive,l.usdaLitigationNotActive),node("No failed Streamline TPP",!l.usdaPriorFailedStreamlineTPP,!l.usdaPriorFailedStreamlineTPP),node("Not Abandoned/Condemned",br,br),node("Intent=Retain",l.borrowerIntentRetention,l.borrowerIntentRetention),node("Owner Occupied",l.occupancyStatus,l.occupancyStatus==="Owner Occupied"),node("Lien=First",l.lienPosition,l.lienPosition==="First"),node("Prior mods < 2 (max 1 Streamline mod lifetime — HB-1-3555 §18.7)",nm,nm<2),node("Foreclosure sale≥60d",l.usdaForeclosureSaleGe60Away,l.usdaForeclosureSaleGe60Away),node("Property not listed for sale",notListedForSale?"No":"Listed for sale",notListedForSale)]});
+  const sb=!isD&&br&&l.borrowerIntentRetention&&l.occupancyStatus==="Owner Occupied"&&nm<2&&!l.usdaPriorFailedStreamlineTPP&&dlqD>=90&&usdaUpb5k&&usdaPayments12&&l.usdaBankruptcyNotActive&&l.usdaLitigationNotActive&&l.usdaForeclosureSaleGe60Away&&notListedForSale;
+  results.push({option:"USDA Streamline Loan Modification",eligible:sb,nodes:[node("Non-disaster hardship",l.hardshipType,!isD),node("≥90d DLQ",dlqD,dlqD>=90),node("UPB≥$5k",usdaUpb5k,usdaUpb5k),node("12+ payments since origination (loan age)",usdaPayments12,usdaPayments12),node("Bankruptcy≠Active",l.usdaBankruptcyNotActive,l.usdaBankruptcyNotActive),node("Litigation≠Active",l.usdaLitigationNotActive,l.usdaLitigationNotActive),node("No failed Streamline TPP",!l.usdaPriorFailedStreamlineTPP,!l.usdaPriorFailedStreamlineTPP),node("Not Abandoned/Condemned",br,br),node("Intent=Retain",l.borrowerIntentRetention,l.borrowerIntentRetention),node("Owner Occupied",l.occupancyStatus,l.occupancyStatus==="Owner Occupied"),node("Lien=First",l.lienPosition,l.lienPosition==="First"),node("Prior mods < 2 (max 1 Streamline mod lifetime — HB-1-3555 §18.7)",nm,nm<2),node("Foreclosure sale≥60d",l.usdaForeclosureSaleGe60Away,l.usdaForeclosureSaleGe60Away),node("Property not listed for sale",notListedForSale?"No":"Listed for sale",notListedForSale)]});
   // USDA Modification + MRA Servicing Plan (Final Rule eff. Feb 11, 2025): when 480mo mod alone can't achieve target
   results.push({option:"USDA Modification + MRA Servicing Plan",eligible:sb&&l.usdaStep3DeferralRequired,nodes:[node("≥90d DLQ",dlqD,dlqD>=90),node("Streamline Mod base eligible",sb,sb),node("480mo re-amortization alone cannot achieve PITI target (Step 3 required)",l.usdaStep3DeferralRequired?"Yes":"No",l.usdaStep3DeferralRequired)],note:"Step 3: MRA principal deferral closes gap when mod + 480mo term still can't reach target — USDA RD Final Rule (Feb 11, 2025)"});
   results.push({option:"USDA Standalone Mortgage Recovery Advance (MRA)",eligible:!isD&&l.usdaBorrowerCanResumeCurrent&&(l.usdaHardshipDurationResolved||l.usdaLoanModIneligible)&&l.usdaBorrowerCannotCureDLQWithin12&&l.lienPosition==="First"&&l.propertyCondition!=="Condemned"&&!l.occupancyAbandoned&&dlqD>=30,nodes:[node("Non-disaster hardship",l.hardshipType,!isD),node("Can resume payment",l.usdaBorrowerCanResumeCurrent,l.usdaBorrowerCanResumeCurrent),node("Resolved OR Mod Ineligible",l.usdaHardshipDurationResolved||l.usdaLoanModIneligible,l.usdaHardshipDurationResolved||l.usdaLoanModIneligible),node("Cannot cure DLQ 12mo",l.usdaBorrowerCannotCureDLQWithin12,l.usdaBorrowerCannotCureDLQWithin12),node("Lien=First",l.lienPosition,l.lienPosition==="First"),node("Not Condemned",l.propertyCondition,l.propertyCondition!=="Condemned"),node("Not Abandoned",!l.occupancyAbandoned,!l.occupancyAbandoned),node("DLQ≥30d (≥1 installment)",dlqD,dlqD>=30)]});
@@ -1801,6 +1811,13 @@ function evaluateVA(l) {
   const sH=STANDARD_HARDSHIPS.includes(l.hardshipType), isD=l.hardshipType==="Disaster";
   const oo=l.occupancyStatus==="Owner Occupied";
   const vN=[node("Lien=First",l.lienPosition,l.lienPosition==="First"),node("Not Condemned",l.propertyCondition,l.propertyCondition!=="Condemned"),node("Not Abandoned",!l.occupancyAbandoned,!l.occupancyAbandoned),node("Foreclosure≠Active",!l.foreclosureActive,!l.foreclosureActive)];
+  // 1d: auto-compute pmmsLeCurrentPlus1
+  const vaPmms = n(l.pmmsRate), vaCurrentRate = n(l.currentInterestRate);
+  const vapmmsLeCurrentPlus1 = vaPmms > 0 && vaCurrentRate > 0 ? vaPmms <= vaCurrentRate + 1 : l.pmmsLeCurrentPlus1;
+  // 1e: auto-compute modifiedPILe90PctOld (computed here, vaModPI declared below in Phase 1)
+  const vaOldPI_90 = n(l.currentPI);
+  const vaModPI_90check = n(l.modifiedPI);
+  const vaModPI90 = vaModPI_90check > 0 && vaOldPI_90 > 0 ? vaModPI_90check <= vaOldPI_90 * 0.90 : l.modifiedPILe90PctOld;
   // Phase 1: auto-compute VA affordability from financial data (VA standard: 41% total DTI)
   const vaGMI = n(l.grossMonthlyIncome);
   const vaPITI = n(l.currentPITI);
@@ -1819,7 +1836,7 @@ function evaluateVA(l) {
   if (isD){
     // Disaster forbearance: triggered by disaster declaration, no minimum DLQ threshold
     results.push({option:"VA Disaster Forbearance",eligible:vb&&l.dlqAtDisasterLt30&&(l.forbearancePeriodLt12||l.totalDLQLt12),nodes:[...vN,node("<30d DLQ at Declaration",l.dlqAtDisasterLt30,l.dlqAtDisasterLt30),node("Forbearance/DLQ<12mo",l.forbearancePeriodLt12||l.totalDLQLt12,l.forbearancePeriodLt12||l.totalDLQLt12)]});
-    results.push({option:"VA Disaster Modification",eligible:vb&&!l.activeRPP&&l.pmmsLeCurrentPlus1&&l.dlqAtDisasterLt30&&l.loanGe60DaysDLQ&&l.previousWorkoutForbearance&&l.workoutStateActivePassed,nodes:[...vN,node("ActiveRPP=False",!l.activeRPP,!l.activeRPP),node("PMMS≤Rate+1%",l.pmmsLeCurrentPlus1,l.pmmsLeCurrentPlus1),node("<30d at Declaration",l.dlqAtDisasterLt30,l.dlqAtDisasterLt30),node("Loan≥60d DLQ",l.loanGe60DaysDLQ,l.loanGe60DaysDLQ),node("Prev=Forbearance",l.previousWorkoutForbearance,l.previousWorkoutForbearance),node("Workout{Active,Passed}",l.workoutStateActivePassed,l.workoutStateActivePassed)]});
+    results.push({option:"VA Disaster Modification",eligible:vb&&!l.activeRPP&&vapmmsLeCurrentPlus1&&l.dlqAtDisasterLt30&&l.loanGe60DaysDLQ&&l.previousWorkoutForbearance&&l.workoutStateActivePassed,nodes:[...vN,node("ActiveRPP=False",!l.activeRPP,!l.activeRPP),node("PMMS≤Rate+1%",vapmmsLeCurrentPlus1,vapmmsLeCurrentPlus1),node("<30d at Declaration",l.dlqAtDisasterLt30,l.dlqAtDisasterLt30),node("Loan≥60d DLQ",l.loanGe60DaysDLQ,l.loanGe60DaysDLQ),node("Prev=Forbearance",l.previousWorkoutForbearance,l.previousWorkoutForbearance),node("Workout{Active,Passed}",l.workoutStateActivePassed,l.workoutStateActivePassed)]});
     results.push({option:"VA Disaster Extend Modification",eligible:vb&&l.hardshipDuration!=="Resolved"&&l.dlqGe12ContractualPayments&&l.dlqAtDisasterLt30&&l.loanGe60DaysDLQ&&l.previousWorkoutForbearance&&l.workoutStateActivePassed,nodes:[...vN,node("Hardship≠Resolved",l.hardshipDuration,l.hardshipDuration!=="Resolved"),node("DLQ≥12 Contractual",l.dlqGe12ContractualPayments,l.dlqGe12ContractualPayments),node("<30d at Declaration",l.dlqAtDisasterLt30,l.dlqAtDisasterLt30),node("Loan≥60d DLQ",l.loanGe60DaysDLQ,l.loanGe60DaysDLQ),node("Prev=Forbearance",l.previousWorkoutForbearance,l.previousWorkoutForbearance),node("Workout{Active,Passed}",l.workoutStateActivePassed,l.workoutStateActivePassed)]});
   }
   // ── VA M26-4 Chapter 5 options — NOTE: Home Retention Waterfall (Appendix F) RESCINDED May 1, 2025 per Circular 26-25-2.
@@ -2062,6 +2079,10 @@ function evaluateFNMA(l) {
   const _fnmaEff = l.approvalEffectiveDate || _today;
   const _fnmaAutoAge = l.noteFirstPaymentDate ? monthsBetween(l.noteFirstPaymentDate, _fnmaEff) : null;
   const loanAge = _fnmaAutoAge !== null ? _fnmaAutoAge : n(l.fnmaLoanAge);
+  // 1a: auto-compute fnmaWithin36MonthsMaturity
+  const _fnmaOrigMat = l.originalMaturityDate || (l.noteFirstPaymentDate && l.noteTerm ? calcOriginalMaturity(l.noteFirstPaymentDate, l.noteTerm) : null);
+  const _fnmaMoToMat = _fnmaOrigMat ? monthsBetween(_fnmaEff, _fnmaOrigMat) : null;
+  const fnmaWithin36Mo = _fnmaMoToMat !== null ? _fnmaMoToMat <= 36 : l.fnmaWithin36MonthsMaturity;
   const priorModCount = n(l.fnmaPriorModCount);
   const cumulativeDeferred = n(l.fnmaCumulativeDeferredMonths);
   const priorDeferralMonths = n(l.fnmaPriorDeferralMonths);
@@ -2120,7 +2141,7 @@ function evaluateFNMA(l) {
     const eligDlqRange = dlq >= 2 && dlq <= 6;
     const eligCumCap = cumulativeDeferred < 12;
     const eligPriorDeferral = priorDeferralMonths === 0 || priorDeferralMonths >= 12;
-    const eligNotNearMaturity = !l.fnmaWithin36MonthsMaturity;
+    const eligNotNearMaturity = !fnmaWithin36Mo;
     const eligNoFailedTPP = !l.fnmaFailedTPP12Months;
     const eligHardship = l.fnmaHardshipResolved || fnmaImminentDefaultAuto;
     const nodes = [
@@ -2133,7 +2154,7 @@ function evaluateFNMA(l) {
       node("Cannot reinstate or afford repayment plan", l.fnmaCannotReinstate?"Yes":"No", l.fnmaCannotReinstate),
       node("Cumulative deferred months < 12 (lifetime)", cumulativeDeferred+"mo", eligCumCap),
       node("Prior non-disaster deferral ≥ 12 months ago (or never)", priorDeferralMonths===0?"None":priorDeferralMonths+"mo ago", eligPriorDeferral),
-      node("Not within 36 months of maturity", l.fnmaWithin36MonthsMaturity?"Within 36mo":"OK", eligNotNearMaturity),
+      node("Not within 36 months of maturity", fnmaWithin36Mo?"Within 36mo":"OK", eligNotNearMaturity),
       node("No failed Flex Mod TPP within 12 months", l.fnmaFailedTPP12Months?"Yes":"No", eligNoFailedTPP),
       ...commonBlockers,
     ];
@@ -2147,7 +2168,7 @@ function evaluateFNMA(l) {
     const eligDlqAtDisaster = dlqAtDisaster < 2;
     const eligDlqRange = dlq >= 1 && dlq <= 12;
     const eligNotSameDisaster = !l.fnmaSameDlisasterPriorDeferral;
-    const eligNotNearMaturity = !l.fnmaWithin36MonthsMaturity;
+    const eligNotNearMaturity = !fnmaWithin36Mo;
     const nodes = [
       node("Disaster-related hardship", l.fnmaDisasterHardship?"Yes":"No", eligDisaster),
       node("FEMA designation or insured property loss", (l.fnmaFEMADesignation||l.fnmaInsuredLoss)?"Yes":"No", eligFEMA),
@@ -2158,7 +2179,7 @@ function evaluateFNMA(l) {
       node("Can resume full contractual payment", l.fnmaCanResumeFull?"Yes":"No", l.fnmaCanResumeFull),
       node("Cannot reinstate or afford repayment plan", l.fnmaCannotReinstate?"Yes":"No", l.fnmaCannotReinstate),
       node("No prior deferral for this same disaster event", l.fnmaSameDlisasterPriorDeferral?"Yes":"No", eligNotSameDisaster),
-      node("Not within 36 months of maturity", l.fnmaWithin36MonthsMaturity?"Within 36mo":"OK", eligNotNearMaturity),
+      node("Not within 36 months of maturity", fnmaWithin36Mo?"Within 36mo":"OK", eligNotNearMaturity),
       ...commonBlockers,
     ];
     results.push({ option:"FNMA Disaster Payment Deferral", eligible:nodes.every(nd=>nd.pass), nodes });
@@ -2243,6 +2264,116 @@ function evaluateFNMA(l) {
     results.push({ option:"Fannie Mae Mortgage Release (DIL)", eligible:nodes.every(nd=>nd.pass), nodes });
   }
   return results;
+}
+
+// ─── WATERFALL ENGINE ─────────────────────────────────────────────────────────
+const WATERFALL_ORDER = {
+  FHA: [
+    "FHA Reinstatement",
+    "FHA Standalone Partial Claim",
+    "FHA Payment Deferral",
+    "FHA 30-Year Standalone Modification",
+    "FHA 40-Year Combination Modification + Partial Claim",
+    "Payment Supplement",
+    "Repayment Plan",
+    "Formal Forbearance",
+    "Special Forbearance – Unemployment",
+  ],
+  USDA: [
+    "USDA Reinstatement",
+    "USDA Informal Forbearance",
+    "USDA Informal Repayment Plan",
+    "USDA Streamline Loan Modification",
+    "USDA Modification + MRA Servicing Plan",
+    "USDA Standalone Mortgage Recovery Advance (MRA)",
+  ],
+  VA: [
+    "VA Reinstatement",
+    "VA Repayment Plan",
+    "VA Special Forbearance",
+    "VA Traditional Modification",
+    "VA 30-Year Loan Modification",
+    "VA 40-Year Loan Modification",
+  ],
+  FHLMC: [
+    "FHLMC Reinstatement",
+    "FHLMC Repayment Plan",
+    "FHLMC Payment Deferral",
+    "FHLMC Disaster Payment Deferral",
+    "Freddie Mac Flex Modification",
+    "Freddie Mac Flex Modification (Streamlined)",
+  ],
+  FNMA: [
+    "FNMA Reinstatement",
+    "FNMA Repayment Plan",
+    "FNMA Payment Deferral",
+    "FNMA Disaster Payment Deferral",
+    "Fannie Mae Flex Modification",
+    "Fannie Mae Flex Modification (Streamlined)",
+  ],
+};
+
+function computeWaterfall(loanType, eligibleResults) {
+  const order = WATERFALL_ORDER[loanType] || [];
+  const eligibleSet = new Set(eligibleResults.map(r => r.option));
+  const waterfallEligible = order
+    .filter(opt => eligibleSet.has(opt))
+    .map(opt => eligibleResults.find(r => r.option === opt))
+    .filter(Boolean);
+  // Also include eligible options not in waterfall order (disaster, disposition, etc.)
+  const inWaterfall = new Set(order);
+  const extras = eligibleResults.filter(r => !inWaterfall.has(r.option));
+  return { waterfallEligible, extras, topOption: waterfallEligible[0] || eligibleResults[0] || null };
+}
+
+function generateWaterfallReason(topOption, loan, calcTerms) {
+  if (!topOption) return "No eligible options found. Review loan for adverse action or foreclosure referral.";
+  const opt = topOption.option;
+  const dlqMo = n(loan.delinquencyMonths);
+  const arrears = n(loan.arrearagesToCapitalize);
+  const currentPI = n(loan.currentPI);
+  const currentPITI = n(loan.currentPITI);
+  const gmi = n(loan.grossMonthlyIncome);
+
+  if (opt.includes("Reinstatement")) {
+    return `Borrower's hardship appears resolved and they have funds to pay all past-due amounts in one lump sum to restore current status.`;
+  }
+  if (opt.includes("Forbearance") && !opt.includes("Modification")) {
+    return `Borrower has an active or temporary hardship; forbearance provides time to recover without modifying loan terms, avoiding penalties during the hardship period.`;
+  }
+  if (opt.includes("Repayment Plan")) {
+    const repayMos = Math.min(24, Math.max(1, n(loan.repayMonths) || 24));
+    const catchUp = arrears > 0 && repayMos > 0 ? (arrears / repayMos).toFixed(2) : null;
+    return `Borrower can resume regular payments${catchUp ? ` plus a monthly catch-up of ~$${catchUp}` : ""} over ${repayMos} months to resolve the arrears without modifying loan terms.`;
+  }
+  if (opt.includes("Payment Deferral")) {
+    const deferAmt = currentPI > 0 ? (dlqMo * currentPI).toFixed(2) : null;
+    return `${dlqMo} month(s) of arrears${deferAmt ? ` (~$${deferAmt})` : ""} can be deferred to loan maturity, keeping the monthly payment unchanged and giving the borrower immediate payment relief.`;
+  }
+  if (opt.includes("Partial Claim") && !opt.includes("Combination")) {
+    return `A partial claim covers the arrears via a non-interest-bearing subordinate lien, allowing the borrower to resume the pre-hardship payment without a modification.`;
+  }
+  if (opt.includes("Combination Modification + Partial Claim")) {
+    const pmms = n(loan.pmmsRate);
+    const modRate = pmms > 0 ? Math.round((pmms + 0.25) / 0.125) * 0.125 : 0;
+    return `A combination modification (${modRate > 0 ? modRate.toFixed(3) + "% rate" : "at PMMS+25bps"}, 480-month term) paired with a partial claim achieves the required 25% P&I payment reduction.`;
+  }
+  if (opt.includes("Modification") || opt.includes("Flex Modification") || opt.includes("Streamline Loan Modification")) {
+    const pmms = n(loan.pmmsRate);
+    return `A loan modification at the ${pmms > 0 ? pmms.toFixed(3) + "% PMMS" : "current market"} rate with extended term achieves a meaningful reduction in monthly payment to an affordable level.`;
+  }
+  if (opt.includes("Payment Supplement")) {
+    const piti = currentPITI, tgt = n(loan.targetPayment) || (currentPI > 0 ? currentPI * 0.75 + n(loan.currentEscrow) : 0);
+    const gap = piti > 0 && tgt > 0 ? Math.max(0, piti - tgt).toFixed(2) : null;
+    return `FHA will supplement the payment gap${gap ? ` of ~$${gap}/mo` : ""} for up to 36 months, bridging the shortfall while the borrower recovers financially.`;
+  }
+  if (opt.includes("MRA") || opt.includes("Mortgage Recovery Advance")) {
+    return `A Mortgage Recovery Advance (MRA) covers the past-due arrears via a non-interest-bearing subordinate lien, allowing the borrower to resume the current payment.`;
+  }
+  if (opt.includes("Short Sale") || opt.includes("Compromise Sale")) {
+    return `Borrower intends to dispose of the property; a short sale/compromise sale avoids foreclosure while providing a more orderly exit.`;
+  }
+  return `This is the highest-priority eligible option per the ${loan.loanType} loss mitigation waterfall guidelines.`;
 }
 
 // ─── UI HELPERS ───────────────────────────────────────────────────────────────
@@ -2347,6 +2478,11 @@ function MainApp({profile,onSignOut}:{profile:Profile;onSignOut:()=>void}) {
   const [results2,setResults2]=useState([]);
   const [evaluated2,setEvaluated2]=useState(false);
   const [showAdmin,setShowAdmin]=useState(false);
+  // Save/Load state
+  const [caseNotes,setCaseNotes]=useState("");
+  const [saveToast,setSaveToast]=useState("");
+  const [showLoadModal,setShowLoadModal]=useState(false);
+  const [savedCases,setSavedCases]=useState<any[]>([]);
   const [pendingUsers,setPendingUsers]=useState<{id:string;email:string;full_name:string;requested_at:string}[]>([]);
   const [adminMsg,setAdminMsg]=useState("");
   useEffect(()=>{
@@ -2371,6 +2507,41 @@ function MainApp({profile,onSignOut}:{profile:Profile;onSignOut:()=>void}) {
   const evalLoan=(l)=>l.loanType==="FHA"?evaluateFHA(l):l.loanType==="USDA"?evaluateUSDA(l):l.loanType==="VA"?evaluateVA(l):l.loanType==="FNMA"?evaluateFNMA(l):evaluateFHLMC(l);
   const evaluate=()=>{setResults(evalLoan(loan));setEvaluated(true);setTab("results");setAiResponse("");};
   const evaluate2=()=>{setResults2(evalLoan(loan2));setEvaluated2(true);};
+
+  const saveCase=async()=>{
+    if(!supabaseConfigured){setSaveToast("Supabase not configured.");setTimeout(()=>setSaveToast(""),3000);return;}
+    try{
+      const topElig=results.filter(r=>r.eligible)[0];
+      await supabase.from("evaluations").insert({
+        loan_number:loan.loanNumber||null,
+        borrower_name:loan.borrowerName||null,
+        loan_type:loan.loanType,
+        loan_data:loan,
+        results:results,
+        notes:caseNotes||null,
+      });
+      setSaveToast("✅ Case saved!");
+      setTimeout(()=>setSaveToast(""),3000);
+    }catch(e:any){setSaveToast("Error saving: "+(e?.message||String(e)));setTimeout(()=>setSaveToast(""),4000);}
+  };
+
+  const loadCases=async()=>{
+    if(!supabaseConfigured){return;}
+    try{
+      const {data}=await supabase.from("evaluations").select("*").order("created_at",{ascending:false}).limit(20);
+      setSavedCases(data||[]);
+      setShowLoadModal(true);
+    }catch(e:any){setSaveToast("Error loading: "+(e?.message||String(e)));setTimeout(()=>setSaveToast(""),4000);}
+  };
+
+  const loadCase=(savedCase:any)=>{
+    setLoan({...initLoan,...savedCase.loan_data});
+    setResults(savedCase.results||[]);
+    setEvaluated(true);
+    setCaseNotes(savedCase.notes||"");
+    setShowLoadModal(false);
+    setTab("results");
+  };
   const eligible=results.filter(r=>r.eligible), ineligible=results.filter(r=>!r.eligible);
   const gmi=n(loan.grossMonthlyIncome);
   const target31=gmi>0?(gmi*0.31).toFixed(2):null;
@@ -2459,6 +2630,35 @@ function MainApp({profile,onSignOut}:{profile:Profile;onSignOut:()=>void}) {
 
   return (
     <div className="min-h-screen bg-slate-100">
+      {/* ── Load Case Modal ── */}
+      {showLoadModal&&(
+        <div className="fixed inset-0 bg-black/60 z-50 flex items-center justify-center p-4" onClick={()=>setShowLoadModal(false)}>
+          <div className="bg-white rounded-2xl shadow-2xl max-w-2xl w-full max-h-[80vh] overflow-hidden" onClick={e=>e.stopPropagation()}>
+            <div className="bg-slate-800 text-white px-5 py-4 flex items-center justify-between">
+              <span className="font-black text-base">📂 Load Saved Case</span>
+              <button onClick={()=>setShowLoadModal(false)} className="text-slate-400 hover:text-white text-lg leading-none">×</button>
+            </div>
+            <div className="overflow-y-auto" style={{maxHeight:"60vh"}}>
+              {savedCases.length===0
+                ? <div className="p-10 text-center text-slate-400">No saved cases found</div>
+                : savedCases.map((c,i)=>(
+                    <button key={i} onClick={()=>loadCase(c)} className="w-full text-left px-5 py-4 border-b border-slate-100 hover:bg-emerald-50 transition-colors">
+                      <div className="flex items-center justify-between">
+                        <div>
+                          <div className="font-bold text-slate-800 text-sm">{c.borrower_name||"(No Name)"} {c.loan_number?"· #"+c.loan_number:""}</div>
+                          <div className="text-xs text-slate-500 mt-0.5">{c.loan_type} · {new Date(c.created_at).toLocaleDateString()}</div>
+                          {c.results&&Array.isArray(c.results)&&(()=>{const top=c.results.find((r:any)=>r.eligible);return top?<div className="text-xs text-emerald-600 font-semibold mt-0.5">Top eligible: {top.option}</div>:null;})()}
+                          {c.notes&&<div className="text-xs text-slate-400 italic mt-0.5 truncate max-w-sm">{c.notes}</div>}
+                        </div>
+                        <span className="text-emerald-600 text-xs font-bold px-3 py-1 bg-emerald-50 rounded-lg">Load →</span>
+                      </div>
+                    </button>
+                  ))
+              }
+            </div>
+          </div>
+        </div>
+      )}
       {/* ── Header ── */}
       <div className="bg-gradient-to-r from-slate-900 via-emerald-950 to-slate-900 text-white px-6 py-4 shadow-xl">
         <div className="max-w-7xl mx-auto flex items-center justify-between">
@@ -2581,7 +2781,10 @@ function MainApp({profile,onSignOut}:{profile:Profile;onSignOut:()=>void}) {
             <div className="bg-white rounded-2xl shadow-sm border border-slate-200 p-5 overflow-y-auto" style={{maxHeight:"82vh"}}>
               <Sec title="🔧 Modification Flags">
                 <Tog label="Borrower Intent = Retention" value={loan.borrowerIntentRetention} onChange={v=>set("borrowerIntentRetention",v)}/>
-                {loan.loanType==="VA"&&<Tog label="Modified P&I ≤ 90% of old P&I" value={loan.modifiedPILe90PctOld} onChange={v=>set("modifiedPILe90PctOld",v)}/>}
+                {loan.loanType==="VA"&&(n(loan.modifiedPI)>0&&n(loan.currentPI)>0
+                  ? <div className="flex items-center justify-between py-1 text-xs"><span className="text-slate-600">Modified P&amp;I ≤ 90% of old P&amp;I</span><span className={`font-semibold ${n(loan.modifiedPI)<=n(loan.currentPI)*0.90?"text-emerald-600":"text-red-500"}`}>{n(loan.modifiedPI)<=n(loan.currentPI)*0.90?"✅ Yes":"❌ No"} — auto (mod {fmt$(n(loan.modifiedPI))} vs 90% {fmt$(n(loan.currentPI)*0.90)})</span></div>
+                  : <Tog label="Modified P&I ≤ 90% of old P&I (manual — enter Modified P&I & Current P&I to auto-compute)" value={loan.modifiedPILe90PctOld} onChange={v=>set("modifiedPILe90PctOld",v)}/>)}
+                {(()=>{const _r=n(loan.currentInterestRate),_p=n(loan.pmmsRate);const _auto=_r>0&&_p>0?_r<=_p+0.25:null;return _auto!==null?<div className="flex items-center justify-between py-1 text-xs"><span className="text-slate-600">Current rate at or below market (rate+25bps)</span><span className={`font-semibold ${_auto?"text-emerald-600":"text-red-500"}`}>{_auto?"✅ Yes":"❌ No"} — auto ({_r.toFixed(3)}% ≤ {(_p+0.25).toFixed(3)}%)</span></div>:<Tog label="Current rate at or below market (manual — enter rates to auto-compute)" value={loan.currentRateAtOrBelowMarket} onChange={v=>set("currentRateAtOrBelowMarket",v)}/>;})()}
               </Sec>
               {loan.loanType==="FHA"&&(()=>{
                 const _pmms=n(loan.pmmsRate), _esc=n(loan.currentEscrow), _pi=n(loan.currentPI);
@@ -2644,16 +2847,22 @@ function MainApp({profile,onSignOut}:{profile:Profile;onSignOut:()=>void}) {
               </>);})()}
               {loan.loanType==="USDA"&&(<>
                 <Sec title="USDA – Streamline Mod">
-                  <Tog label="UPB ≥ $5,000" value={loan.usdaUpbGe5000} onChange={v=>set("usdaUpbGe5000",v)}/>
-                  <Tog label="12+ payments since origination" value={loan.usdaPaymentsMade12} onChange={v=>set("usdaPaymentsMade12",v)}/>
+                  {n(loan.upb)>0
+                    ? <div className="flex items-center justify-between py-1 text-xs"><span className="text-slate-600">UPB ≥ $5,000</span><span className={`font-semibold ${n(loan.upb)>=5000?"text-emerald-600":"text-red-500"}`}>{n(loan.upb)>=5000?"✅ Yes":"❌ No"} — auto ({fmt$(n(loan.upb))})</span></div>
+                    : <Tog label="UPB ≥ $5,000 (manual — enter UPB above to auto-compute)" value={loan.usdaUpbGe5000} onChange={v=>set("usdaUpbGe5000",v)}/>}
+                  {(()=>{const _today=new Date().toISOString().split("T")[0];const _eff=loan.approvalEffectiveDate||_today;const _age=loan.noteFirstPaymentDate?monthsBetween(loan.noteFirstPaymentDate,_eff):null;return _age!==null?<div className="flex items-center justify-between py-1 text-xs"><span className="text-slate-600">12+ payments since origination (loan age)</span><span className={`font-semibold ${_age>=12?"text-emerald-600":"text-red-500"}`}>{_age>=12?"✅ Yes":"❌ No"} — auto ({_age} months)</span></div>:<Tog label="12+ payments since origination (manual — enter Note First Payment Date to auto-compute)" value={loan.usdaPaymentsMade12} onChange={v=>set("usdaPaymentsMade12",v)}/>;})()}
                   <Tog label="Bankruptcy ≠ Active" value={loan.usdaBankruptcyNotActive} onChange={v=>set("usdaBankruptcyNotActive",v)}/>
                   <Tog label="Litigation ≠ Active" value={loan.usdaLitigationNotActive} onChange={v=>set("usdaLitigationNotActive",v)}/>
                   <Tog label="No prior failed Streamline TPP" value={!loan.usdaPriorFailedStreamlineTPP} onChange={v=>set("usdaPriorFailedStreamlineTPP",!v)}/>
                   <F label="# Previous Modifications"><Num value={loan.usdaNumPrevMods} onChange={v=>set("usdaNumPrevMods",v)} placeholder="0"/></F>
                   <Tog label="Foreclosure sale ≥ 60 days away" value={loan.usdaForeclosureSaleGe60Away} onChange={v=>set("usdaForeclosureSaleGe60Away",v)}/>
                   <Tog label="Property not listed for sale" value={!loan.propertyListedForSale} onChange={v=>set("propertyListedForSale",!v)}/>
-                  <Tog label="Forbearance period < 12 months" value={loan.usdaForbearancePeriodLt12} onChange={v=>set("usdaForbearancePeriodLt12",v)}/>
-                  <Tog label="Total DLQ < 12 months" value={loan.usdaTotalDLQLt12} onChange={v=>set("usdaTotalDLQLt12",v)}/>
+                  {n(loan.delinquencyMonths)>0
+                    ? <div className="flex items-center justify-between py-1 text-xs"><span className="text-slate-600">Forbearance period &lt; 12 months</span><span className={`font-semibold ${n(loan.delinquencyMonths)<12?"text-emerald-600":"text-red-500"}`}>{n(loan.delinquencyMonths)<12?"✅ Yes":"❌ No"} — auto ({n(loan.delinquencyMonths)} mo DLQ)</span></div>
+                    : <Tog label="Forbearance period < 12 months (manual — enter Delinquency Months to auto-compute)" value={loan.usdaForbearancePeriodLt12} onChange={v=>set("usdaForbearancePeriodLt12",v)}/>}
+                  {n(loan.delinquencyMonths)>0
+                    ? <div className="flex items-center justify-between py-1 text-xs"><span className="text-slate-600">Total DLQ &lt; 12 months</span><span className={`font-semibold ${n(loan.delinquencyMonths)<12?"text-emerald-600":"text-red-500"}`}>{n(loan.delinquencyMonths)<12?"✅ Yes":"❌ No"} — auto ({n(loan.delinquencyMonths)} mo DLQ)</span></div>
+                    : <Tog label="Total DLQ < 12 months (manual — enter Delinquency Months to auto-compute)" value={loan.usdaTotalDLQLt12} onChange={v=>set("usdaTotalDLQLt12",v)}/>}
                   <Tog label="Hardship type not excluded" value={loan.usdaHardshipNotExcluded} onChange={v=>set("usdaHardshipNotExcluded",v)}/>
                   <Tog label="New RPP payment ≤ 200% of current" value={loan.usdaNewPaymentLe200pct} onChange={v=>set("usdaNewPaymentLe200pct",v)}/>
                   {(()=>{const _g=n(loan.grossMonthlyIncome),_p=n(loan.currentPITI),_e=n(loan.monthlyExpenses);const _net=_g>0&&_p>0&&loan.monthlyExpenses!==""?_g-_p-_e:null;return _net!==null?<div className="flex items-center justify-between py-1 text-xs"><span className="text-slate-600">Borrower has positive net income</span><span className={`font-semibold ${_net>0?"text-emerald-600":"text-red-500"}`}>{_net>0?"✅ Yes":"❌ No"} — auto (GMI {fmt$(_g)} − PITI {fmt$(_p)} − exp {fmt$(_e)} = {fmt$(_net)})</span></div>:<Tog label="Borrower has positive net income (manual)" value={loan.usdaBorrowerPositiveNetIncome} onChange={v=>set("usdaBorrowerPositiveNetIncome",v)}/>;})()}
@@ -2700,7 +2909,9 @@ function MainApp({profile,onSignOut}:{profile:Profile;onSignOut:()=>void}) {
                 </Sec>
                 <Sec title="VA – Disaster">
                   <div className="bg-blue-50 border border-blue-200 rounded-lg px-3 py-2 text-xs text-blue-700 mb-1">These fields reflect current workout status — pull from servicing system</div>
-                  <Tog label="PMMS ≤ Current Rate + 1%" value={loan.pmmsLeCurrentPlus1} onChange={v=>set("pmmsLeCurrentPlus1",v)}/>
+                  {n(loan.pmmsRate)>0&&n(loan.currentInterestRate)>0
+                    ? <div className="flex items-center justify-between py-1 text-xs"><span className="text-slate-600">PMMS ≤ Current Rate + 1%</span><span className={`font-semibold ${n(loan.pmmsRate)<=n(loan.currentInterestRate)+1?"text-emerald-600":"text-red-500"}`}>{n(loan.pmmsRate)<=n(loan.currentInterestRate)+1?"✅ Yes":"❌ No"} — auto (PMMS {n(loan.pmmsRate).toFixed(3)}% ≤ {(n(loan.currentInterestRate)+1).toFixed(3)}%)</span></div>
+                    : <Tog label="PMMS ≤ Current Rate + 1% (manual — enter both rates to auto-compute)" value={loan.pmmsLeCurrentPlus1} onChange={v=>set("pmmsLeCurrentPlus1",v)}/>}
                   <Tog label="Active RPP = False" value={!loan.activeRPP} onChange={v=>set("activeRPP",!v)}/>
                   <Tog label="< 30 Days DLQ at Disaster Declaration" value={loan.dlqAtDisasterLt30} onChange={v=>set("dlqAtDisasterLt30",v)}/>
                   <Tog label="Loan ≥ 60 Days DLQ" value={loan.loanGe60DaysDLQ} onChange={v=>set("loanGe60DaysDLQ",v)}/>
@@ -2732,7 +2943,7 @@ function MainApp({profile,onSignOut}:{profile:Profile;onSignOut:()=>void}) {
                   <Tog label="Can resume full contractual monthly payment" value={loan.fnmaCanResumeFull} onChange={v=>set("fnmaCanResumeFull",v)}/>
                   <Tog label="Cannot reinstate or afford repayment plan" value={loan.fnmaCannotReinstate} onChange={v=>set("fnmaCannotReinstate",v)}/>
                   {(()=>{const _cash=n(loan.cashReservesAmount),_piti=n(loan.currentPITI),_gmi=n(loan.grossMonthlyIncome),_fico=n(loan.fnmaFICO);const _hr=_piti>0&&_gmi>0?_piti/_gmi*100:n(loan.fnmaHousingRatio);const _hasInputs=_cash>0&&_piti>0&&_gmi>0&&_fico>0&&loan.fnmaPropertyType!=="";const _cashLt3Mo=_cash>0&&_piti>0?_cash<_piti*3:loan.fnmaCashReservesLt3Mo;const _isPrimary=loan.fnmaPropertyType==="Principal Residence";const _r1=_isPrimary&&loan.fnmaLongTermHardship&&_cashLt3Mo;const _r2=_fico<=620||loan.fnmaPrior30DLQ12Mo||_hr>55;const _autoID=_hasInputs?(_r1&&_r2):null;return _autoID!==null?<div className="flex items-center justify-between py-1 text-xs"><span className="text-slate-600">Servicer imminent default determination</span><span className={`font-semibold ${_autoID?"text-amber-600":"text-emerald-600"}`}>{_autoID?"⚠️ Yes (auto)":"✅ No (auto)"} — R1:{_r1?"✓":"✗"} R2:{_r2?"✓":"✗"}</span></div>:<Tog label="Servicer imminent default determination (manual — enter cash, PITI, GMI, FICO to auto-compute)" value={loan.fnmaImminentDefault} onChange={v=>set("fnmaImminentDefault",v)}/>;})()}
-                  <Tog label="Within 36 months of maturity or projected payoff" value={loan.fnmaWithin36MonthsMaturity} onChange={v=>set("fnmaWithin36MonthsMaturity",v)}/>
+                  {(()=>{const _today=new Date().toISOString().split("T")[0];const _eff=loan.approvalEffectiveDate||_today;const _origMat=loan.originalMaturityDate||(loan.noteFirstPaymentDate&&loan.noteTerm?calcOriginalMaturity(loan.noteFirstPaymentDate,loan.noteTerm):null);const _mo=_origMat?monthsBetween(_eff,_origMat):null;return _mo!==null?<div className="flex items-center justify-between py-1 text-xs"><span className="text-slate-600">Within 36 months of maturity</span><span className={`font-semibold ${_mo<=36?"text-red-500":"text-emerald-600"}`}>{_mo<=36?"⚠️ Yes — within 36mo":"✅ No"} — auto ({_mo} mo remaining)</span></div>:<Tog label="Within 36 months of maturity or projected payoff (manual — enter Maturity Date to auto-compute)" value={loan.fnmaWithin36MonthsMaturity} onChange={v=>set("fnmaWithin36MonthsMaturity",v)}/>;})()}
                   <Tog label="QRPC (Qualified Right Party Contact) achieved" value={loan.fnmaQRPCAchieved} onChange={v=>set("fnmaQRPCAchieved",v)}/>
                 </Sec>
                 {loan.fnmaImminentDefault && (
@@ -2874,6 +3085,9 @@ function MainApp({profile,onSignOut}:{profile:Profile;onSignOut:()=>void}) {
                 </div>);
               })()}
               <button onClick={evaluate} className="w-full bg-gradient-to-r from-emerald-700 to-emerald-800 hover:from-emerald-800 hover:to-emerald-900 text-white font-black py-3 rounded-xl text-sm mt-3 shadow-lg shadow-emerald-200 transition-all active:scale-95">🔍 Evaluate Loan →</button>
+              {supabaseConfigured
+                ? <button onClick={loadCases} className="w-full bg-white border border-slate-200 hover:bg-slate-50 text-slate-700 font-bold py-2.5 rounded-xl text-sm mt-2 shadow-sm transition-all">📂 Load Case</button>
+                : <div className="mt-2 text-xs text-slate-400 text-center bg-slate-50 rounded-xl px-3 py-2 border border-slate-100">Supabase not configured — set up .env to enable save/load</div>}
             </div>
           </div>
         )}
@@ -2892,7 +3106,50 @@ function MainApp({profile,onSignOut}:{profile:Profile;onSignOut:()=>void}) {
                   <span className="text-xs bg-emerald-100 text-emerald-800 px-2.5 py-1 rounded-full font-bold">{eligible.length} eligible</span>
                   <span className="text-xs bg-red-100 text-red-700 px-2.5 py-1 rounded-full font-bold">{ineligible.length} ineligible</span>
                   <button onClick={printReport} className="ml-auto text-xs bg-white hover:bg-slate-50 text-slate-600 border border-slate-200 px-3 py-1.5 rounded-lg shadow-sm font-medium transition-all">🖨 Print Report</button>
+                  {supabaseConfigured
+                    ? <button onClick={saveCase} className="text-xs bg-emerald-600 hover:bg-emerald-700 text-white border border-emerald-600 px-3 py-1.5 rounded-lg shadow-sm font-medium transition-all">💾 Save Case</button>
+                    : null}
                 </div>
+                {saveToast&&<div className="bg-emerald-50 border border-emerald-300 text-emerald-800 text-xs px-3 py-2 rounded-xl mb-3 font-semibold">{saveToast}</div>}
+                {/* Recommended Path */}
+                {(()=>{
+                  const {waterfallEligible,extras,topOption}=computeWaterfall(loan.loanType,eligible);
+                  const reason=generateWaterfallReason(topOption,loan,null);
+                  if(eligible.length===0)return null;
+                  return(
+                    <div className="bg-gradient-to-r from-emerald-50 to-blue-50 border border-emerald-200 rounded-2xl p-5 mb-5">
+                      <div className="text-sm font-black text-emerald-800 mb-3">🎯 Recommended Waterfall Path</div>
+                      {topOption&&(
+                        <div className="bg-white rounded-xl p-4 border border-emerald-300 mb-3">
+                          <div className="text-xs text-slate-500 uppercase tracking-widest mb-1">Best Option</div>
+                          <div className="text-lg font-black text-emerald-700">{topOption.option}</div>
+                          <div className="text-sm text-slate-600 mt-1">{reason}</div>
+                          {topOption.note&&<div className="text-xs text-emerald-600 mt-1.5 italic">{topOption.note}</div>}
+                        </div>
+                      )}
+                      {waterfallEligible.length>1&&(<>
+                        <div className="text-xs font-bold text-slate-500 uppercase mb-2">Full eligible waterfall</div>
+                        {waterfallEligible.map((opt,i)=>(
+                          <div key={i} className="flex items-center gap-2 py-1 text-sm">
+                            <span className="text-slate-400 w-5 text-right">{i+1}.</span>
+                            <span className="text-emerald-700 font-semibold">{opt.option}</span>
+                          </div>
+                        ))}
+                      </>)}
+                      {extras.length>0&&(
+                        <div className="mt-2 pt-2 border-t border-emerald-100">
+                          <div className="text-xs font-bold text-slate-400 uppercase mb-1">Also eligible (disaster/disposition)</div>
+                          {extras.map((opt,i)=>(
+                            <div key={i} className="flex items-center gap-2 py-0.5 text-xs">
+                              <span className="text-slate-400">•</span>
+                              <span className="text-blue-700 font-medium">{opt.option}</span>
+                            </div>
+                          ))}
+                        </div>
+                      )}
+                    </div>
+                  );
+                })()}
                 {/* Waterfall */}
                 <div className="bg-white rounded-2xl border border-slate-200 shadow-sm p-4 mb-4">
                   <div className="text-[10px] font-black uppercase tracking-widest text-slate-400 mb-3">Waterfall Sequence</div>
@@ -2932,6 +3189,14 @@ function MainApp({profile,onSignOut}:{profile:Profile;onSignOut:()=>void}) {
             </div>
             <div className="overflow-y-auto" style={{maxHeight:"82vh"}}>
               {evaluated&&(<>
+                {supabaseConfigured&&(
+                  <div className="bg-white rounded-xl border border-slate-200 shadow-sm p-4 mb-4">
+                    <div className="text-[10px] font-black uppercase tracking-widest text-slate-400 mb-2">Case Notes</div>
+                    <textarea className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-emerald-400 resize-none" rows={3} value={caseNotes} onChange={e=>setCaseNotes(e.target.value)} placeholder="Add underwriting notes, documentation status, etc."/>
+                    <button onClick={saveCase} className="mt-2 w-full bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-bold py-2 rounded-lg transition-all">💾 Save Case</button>
+                    {saveToast&&<div className="mt-1.5 text-xs text-emerald-700 font-semibold">{saveToast}</div>}
+                  </div>
+                )}
                 <div className="text-[10px] font-black uppercase tracking-widest text-slate-400 mb-3">Ineligible Options</div>
                 {ineligible.map((r,i)=>{
                   const fail=r.nodes?.find(nd=>!nd.pass);
@@ -3006,7 +3271,24 @@ function MainApp({profile,onSignOut}:{profile:Profile;onSignOut:()=>void}) {
                     <h2 className="text-xl font-black text-slate-800">Loss Mitigation Evaluation</h2>
                     <p className="text-sm text-slate-500 mt-0.5">{new Date().toLocaleDateString()} · {loan.loanType}{loan.loanNumber?" · Loan #"+loan.loanNumber:""}{loan.borrowerName?" · "+loan.borrowerName:""}</p>
                   </div>
-                  <button onClick={printReport} className="bg-slate-800 hover:bg-slate-900 text-white text-xs px-4 py-2 rounded-lg font-bold shadow-sm transition-all">🖨 Print</button>
+                  <div className="flex gap-2">
+                    <button onClick={printReport} className="bg-slate-800 hover:bg-slate-900 text-white text-xs px-4 py-2 rounded-lg font-bold shadow-sm transition-all">📄 Print Report</button>
+                    <button onClick={()=>{
+                      const txt=[
+                        `LOSS MITIGATION EVALUATION REPORT`,
+                        `Date: ${new Date().toLocaleDateString()} | Loan Type: ${loan.loanType}${loan.loanNumber?" | Loan #: "+loan.loanNumber:""}${loan.borrowerName?" | Borrower: "+loan.borrowerName:""}`,
+                        `DLQ: ${loan.delinquencyMonths||"—"} months | Hardship: ${loan.hardshipType} (${loan.hardshipDuration})`,
+                        `UPB: ${loan.upb?fmt$(n(loan.upb)):"—"} | GMI: ${gmi>0?"$"+Number(loan.grossMonthlyIncome).toLocaleString():"—"}`,
+                        "",
+                        `ELIGIBLE OPTIONS (${eligible.length}):`,
+                        ...eligible.map((r,i)=>`  ${i+1}. ${r.option}${r.note?" — "+r.note:""}`),
+                        "",
+                        `INELIGIBLE OPTIONS (${ineligible.length}):`,
+                        ...ineligible.map(r=>{const f=r.nodes?.find((nd:any)=>!nd.pass);return`  ✗ ${r.option}${f?" — Failed: "+f.question+" ("+f.answer+")":""}`;})
+                      ].join("\n");
+                      navigator.clipboard.writeText(txt).then(()=>{setSaveToast("✅ Copied to clipboard!");setTimeout(()=>setSaveToast(""),3000);});
+                    }} className="bg-white border border-slate-200 hover:bg-slate-50 text-slate-700 text-xs px-4 py-2 rounded-lg font-bold shadow-sm transition-all">💾 Copy as Text</button>
+                  </div>
                 </div>
                 <div className="grid grid-cols-5 gap-3 mb-5">
                   {[["DLQ",loan.delinquencyMonths?loan.delinquencyMonths+"mo":"—","bg-orange-50 border-orange-200"],["UPB",loan.upb?fmt$(n(loan.upb)):"—","bg-emerald-50 border-emerald-200"],["GMI",gmi>0?"$"+Number(loan.grossMonthlyIncome).toLocaleString():"—","bg-teal-50 border-teal-200"],["31% Target",target31?"$"+target31:"—","bg-emerald-50 border-emerald-200"],["Eligible",eligible.length,eligible.length>0?"bg-emerald-50 border-emerald-200":"bg-red-50 border-red-200"]].map(([k,v,cls])=>(<div key={k} className={`rounded-xl p-3 text-center border ${cls}`}><div className="text-[10px] font-bold uppercase tracking-widest text-slate-400 mb-1">{k}</div><div className="font-black text-sm text-slate-800">{v}</div></div>))}
@@ -3033,6 +3315,7 @@ function MainApp({profile,onSignOut}:{profile:Profile;onSignOut:()=>void}) {
                 {aiResponse&&<div className="text-sm text-slate-800 whitespace-pre-wrap bg-slate-50 rounded-xl p-4 border border-slate-200 leading-relaxed">{aiResponse}</div>}
                 {!aiResponse&&!aiLoading&&<p className="text-xs text-slate-400 bg-slate-50 rounded-xl p-3 border border-slate-100">Enter your API key and click Analyze to get expert waterfall recommendations, documentation checklists, and compliance notes.</p>}
               </div>
+              {saveToast&&<div className="mt-3 bg-emerald-50 border border-emerald-200 text-emerald-800 text-xs px-3 py-2 rounded-xl font-semibold">{saveToast}</div>}
               <div className="mt-4 bg-amber-50 border border-amber-200 rounded-xl p-3 text-xs text-amber-800"><strong>Disclaimer:</strong> Decision-support tool only. Final determinations must be confirmed by a qualified loss mitigation underwriter per current HUD, USDA, and VA guidelines.</div>
             </>)}
           </div>
